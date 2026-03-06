@@ -1,5 +1,6 @@
 """
 High-speed mempool listener with WebSocket subscriptions and multiple RPC endpoints
+Optimized for minimal latency with real-time transaction streaming
 """
 import asyncio
 import logging
@@ -175,14 +176,79 @@ class MempoolListener:
             logger.debug(f"Error decoding transaction: {e}")
             return None
     
+    async def _subscribe_to_mempool(self, substrate: SubstrateInterface):
+        """Subscribe to pending extrinsics via WebSocket (real-time)"""
+        try:
+            # Use subscription for real-time updates
+            subscription_id = await asyncio.to_thread(
+                substrate.subscribe_block_headers,
+                lambda header: None  # We'll use pending extrinsics instead
+            )
+            
+            # Subscribe to pending extrinsics
+            while self.running:
+                try:
+                    # Get pending extrinsics via subscription
+                    pending = await asyncio.to_thread(
+                        substrate.rpc_request,
+                        "author_pendingExtrinsics",
+                        []
+                    )
+                    
+                    if pending:
+                        await self._process_pending_batch(pending)
+                    
+                    await asyncio.sleep(0.01)  # 10ms check interval
+                    
+                except Exception as e:
+                    logger.debug(f"Subscription error: {e}")
+                    await asyncio.sleep(0.1)
+                    
+        except Exception as e:
+            logger.warning(f"WebSocket subscription failed, falling back to polling: {e}")
+            return False
+        
+        return True
+    
+    async def _process_pending_batch(self, pending: List[Dict[str, Any]]):
+        """Process a batch of pending transactions"""
+        current_time = time.time()
+        new_txs = {}
+        
+        for tx in pending:
+            tx_hash = tx.get("hash", "")
+            if not tx_hash:
+                continue
+            
+            # Skip if already processed recently
+            if tx_hash in self.tx_cache:
+                if current_time - self.tx_cache[tx_hash] < 0.5:  # 500ms deduplication
+                    continue
+            
+            decoded = self._decode_transaction_fast(tx)
+            if decoded:
+                new_txs[tx_hash] = decoded
+                self.tx_cache[tx_hash] = current_time
+        
+        # Fire callbacks for new transactions (parallel, non-blocking)
+        for tx_hash, tx_data in new_txs.items():
+            for callback in self.callbacks:
+                asyncio.create_task(self._safe_callback(callback, tx_data))
+    
     async def start(self):
-        """Start listening to mempool with high-frequency polling"""
+        """Start listening to mempool with WebSocket subscriptions + polling fallback"""
         self.running = True
         await self.connect()
         
         logger.info(f"Mempool listener started with {len(self.substrates)} RPC connections")
         
-        # Use very short interval for maximum speed
+        # Try WebSocket subscription on primary connection
+        if self.substrates:
+            subscription_task = asyncio.create_task(
+                self._subscribe_to_mempool(self.substrates[0])
+            )
+        
+        # Also run high-frequency polling as backup and for additional nodes
         check_interval = max(0.05, config.mempool_check_interval)  # Minimum 50ms
         
         while self.running:

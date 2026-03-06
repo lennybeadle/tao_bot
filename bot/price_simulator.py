@@ -122,52 +122,77 @@ class PriceSimulator:
         min_profit: float = 0.05
     ) -> Optional[Tuple[float, float, float]]:
         """
-        Find optimal bot stake size - optimized for speed
+        Find optimal bot stake size - ultra-optimized for <5ms execution
         
         Returns:
             (optimal_stake, expected_profit, price_move) or None if not profitable
         """
-        # Quick profitability check first
-        quick_price_move = (wallet_stake / pool.tao) * 100 if pool.tao > 0 else 0
-        if quick_price_move < 0.1:  # Less than 0.1% move, skip
+        # Ultra-fast profitability check (single division)
+        if pool.tao <= 0 or pool.alpha <= 0:
             return None
+        
+        # Quick estimate: price impact must be significant
+        impact_ratio = wallet_stake / pool.tao
+        if impact_ratio < 0.001:  # Less than 0.1% impact, skip immediately
+            return None
+        
+        # Pre-calculate constants for speed
+        k = pool.k  # Constant product
+        tao0 = pool.tao
+        alpha0 = pool.alpha
         
         best_profit = 0.0
         best_stake = 0.0
         best_price_move = 0.0
         
-        # Optimized test sizes - fewer iterations
-        # Use golden ratio search for faster convergence
-        test_sizes = [
-            wallet_stake * 0.2,  # 20%
-            wallet_stake * 0.4,  # 40%
-            wallet_stake * 0.6,  # 60%
-            wallet_stake * 0.8,  # 80%
+        # Ultra-fast heuristic: use wallet_stake ratio for initial guess
+        # Most profitable is typically 40-60% of wallet stake
+        candidate_stakes = [
+            wallet_stake * 0.3,  # 30%
+            wallet_stake * 0.5,  # 50% - most common optimal
+            wallet_stake * 0.7,  # 70%
         ]
         
-        # Add strategic fixed sizes
+        # Add fixed sizes if they fit
         if max_bot_stake >= 50:
-            test_sizes.extend([10, 25, 50])
+            candidate_stakes.extend([25.0, 50.0])
         elif max_bot_stake >= 20:
-            test_sizes.extend([5, 10, 20])
+            candidate_stakes.extend([10.0, 20.0])
         else:
-            test_sizes.extend([1, 2, 5])
+            candidate_stakes.extend([5.0, 10.0])
         
-        # Filter and sort
-        test_sizes = sorted(set([s for s in test_sizes if 0 < s <= max_bot_stake]))
+        # Filter, sort, and limit to 5 candidates max (for speed)
+        candidate_stakes = sorted(
+            [s for s in candidate_stakes if 0 < s <= max_bot_stake]
+        )[:5]
         
-        # Limit iterations for speed
-        test_sizes = test_sizes[:8]  # Max 8 tests
-        
-        for bot_stake in test_sizes:
-            profit, price_move, _ = PriceSimulator.simulate_bot_trade(
-                pool, wallet_stake, bot_stake
-            )
+        # Fast simulation loop (optimized math)
+        for bot_stake in candidate_stakes:
+            # Step 1: Bot stakes (inlined for speed)
+            tao1 = tao0 + bot_stake
+            alpha1 = k / tao1
+            price_entry = tao1 / alpha1
+            
+            # Step 2: Wallet stakes
+            tao2 = tao1 + wallet_stake
+            alpha2 = k / tao2
+            price_after = tao2 / alpha2
+            
+            # Step 3: Bot unstakes (receives TAO)
+            alpha_received = alpha0 - alpha1
+            if alpha_received <= 0:
+                continue
+            
+            # Calculate TAO received (simplified formula)
+            tao_received = (alpha_received * tao2) / alpha2
+            
+            # Profit calculation
+            profit = tao_received - bot_stake
             
             if profit > best_profit and profit >= min_profit:
                 best_profit = profit
                 best_stake = bot_stake
-                best_price_move = price_move
+                best_price_move = ((price_after - pool.price()) / pool.price()) * 100
         
         if best_profit > 0:
             return best_stake, best_profit, best_price_move

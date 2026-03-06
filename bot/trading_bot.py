@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class TradingBot:
-    """Main trading bot"""
+    """Main trading bot - optimized for minimal latency"""
     
     def __init__(self):
         self.mempool_listener = MempoolListener()
@@ -30,6 +30,13 @@ class TradingBot:
         # In-memory pool cache for ultra-fast access
         self.pool_cache: Dict[int, tuple] = {}  # netuid -> (SubnetPool, timestamp)
         self.cache_ttl = 10  # Cache for 10 seconds
+        
+        # Latency tracking
+        self.latency_metrics = {
+            "detect_to_decision": [],
+            "decision_to_execute": [],
+            "total_pipeline": []
+        }
     
     async def initialize(self):
         """Initialize bot components"""
@@ -45,7 +52,43 @@ class TradingBot:
         from bot.database import init_db
         await init_db()
         
+        # Start background liquidity updater
+        asyncio.create_task(self._background_liquidity_updater())
+        
         logger.info("Trading bot initialized")
+    
+    async def _background_liquidity_updater(self):
+        """Background task to update liquidity cache every block (~12 seconds)"""
+        last_block = 0
+        
+        while self.running:
+            try:
+                # Get current block
+                loop = asyncio.get_event_loop()
+                current_block = await loop.run_in_executor(
+                    None,
+                    lambda: self.subtensor.get_current_block()
+                )
+                
+                # Update cache if new block
+                if current_block > last_block:
+                    last_block = current_block
+                    
+                    # Update liquidity for all monitored subnets in parallel
+                    tasks = [
+                        self._get_subnet_pool(netuid) 
+                        for netuid in config.monitored_subnets
+                    ]
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                    
+                    logger.debug(f"Liquidity cache updated at block {current_block}")
+                
+                # Check every 2 seconds (faster than block time for responsiveness)
+                await asyncio.sleep(2)
+                
+            except Exception as e:
+                logger.debug(f"Liquidity updater error: {e}")
+                await asyncio.sleep(5)
     
     async def _get_subnet_pool(self, netuid: int) -> Optional[SubnetPool]:
         """Get current subnet pool state - optimized with in-memory cache"""
@@ -105,9 +148,10 @@ class TradingBot:
             logger.debug(f"Error updating DB cache: {e}")
     
     async def _handle_stake_detection(self, tx_data: Dict[str, Any]):
-        """Handle detected stake transaction - optimized for speed"""
+        """Handle detected stake transaction - optimized for speed with latency tracking"""
         import time
-        start_time = time.time()
+        pipeline_start = time.time()
+        detect_time = tx_data.get("timestamp", pipeline_start)
         
         if tx_data.get("type") != "stake":
             return
@@ -117,7 +161,7 @@ class TradingBot:
             self.daily_trades = 0
             self.last_reset = datetime.now().date()
         
-        # Check daily limit
+        # Check daily limit (fast check, no I/O)
         if self.daily_trades >= config.max_daily_trades:
             return
         
@@ -125,18 +169,21 @@ class TradingBot:
         wallet_stake = tx_data["amount"]
         wallet_address = tx_data.get("hotkey_ss58", "unknown")
         
+        # Ultra-fast filter: quick threshold check before any computation
+        if wallet_stake < config.min_wallet_stake:
+            return
+        
         logger.info(f"⚡ DETECTED: {wallet_stake} TAO stake on subnet {netuid}")
         
-        # Parallel execution: get pool and simulate simultaneously
-        pool_task = self._get_subnet_pool(netuid)
+        decision_start = time.time()
         
-        # Get pool (cached, should be fast)
-        pool = await pool_task
+        # Get pool (cached, should be <1ms)
+        pool = await self._get_subnet_pool(netuid)
         if not pool:
             logger.warning(f"Could not get pool state for subnet {netuid}")
             return
         
-        # Fast simulation (in-memory, no I/O)
+        # Fast simulation (in-memory, no I/O) - target <5ms
         result = PriceSimulator.find_optimal_stake(
             pool=pool,
             wallet_stake=wallet_stake,
@@ -144,12 +191,14 @@ class TradingBot:
             min_profit=config.min_expected_profit
         )
         
+        decision_time = time.time() - decision_start
+        self._record_latency("detect_to_decision", decision_time * 1000)
+        
         if not result:
             return
         
         optimal_stake, expected_profit, price_move = result
         
-        decision_time = time.time() - start_time
         logger.info(
             f"✅ PROFITABLE! Bot: {optimal_stake} TAO, "
             f"Profit: {expected_profit:.4f} TAO, "
@@ -168,30 +217,61 @@ class TradingBot:
             "price_before": pool.price(),
             "expected_profit": expected_profit,
             "status": "pending",
-            "wallet_tx": tx_data.get("tx_hash")
+            "wallet_tx": tx_data.get("tx_hash"),
+            "detect_timestamp": detect_time,
+            "decision_timestamp": decision_start
         }
         
         # Execute trade immediately (don't await - fire and continue)
-        asyncio.create_task(self._execute_trade(trade_id, trade_data, pool))
+        execute_start = time.time()
+        asyncio.create_task(self._execute_trade(trade_id, trade_data, pool, execute_start))
+        
+        # Record total pipeline latency
+        total_time = time.time() - pipeline_start
+        self._record_latency("total_pipeline", total_time * 1000)
+    
+    def _record_latency(self, metric: str, latency_ms: float):
+        """Record latency metric"""
+        if metric in self.latency_metrics:
+            self.latency_metrics[metric].append(latency_ms)
+            # Keep only last 100 measurements
+            if len(self.latency_metrics[metric]) > 100:
+                self.latency_metrics[metric] = self.latency_metrics[metric][-100:]
+            
+            # Log statistics periodically
+            if len(self.latency_metrics[metric]) % 10 == 0:
+                metrics = self.latency_metrics[metric]
+                avg = sum(metrics) / len(metrics)
+                min_lat = min(metrics)
+                max_lat = max(metrics)
+                logger.info(
+                    f"📊 {metric}: avg={avg:.1f}ms, min={min_lat:.1f}ms, max={max_lat:.1f}ms"
+                )
     
     async def _execute_trade(
         self,
         trade_id: str,
         trade_data: Dict[str, Any],
-        pool: SubnetPool
+        pool: SubnetPool,
+        execute_start: float
     ):
-        """Execute front-run trade"""
+        """Execute front-run trade with latency tracking"""
+        import time
         try:
             netuid = trade_data["subnet_id"]
             bot_stake = trade_data["bot_stake"]
             
             # Step 1: Bot stakes
             logger.info(f"Executing bot stake: {bot_stake} TAO on subnet {netuid}")
+            stake_start = time.time()
             stake_tx = await self.execution_engine.execute_stake(
                 netuid=netuid,
                 amount=bot_stake,
                 trade_id=trade_id
             )
+            
+            execute_time = time.time() - execute_start
+            self._record_latency("decision_to_execute", execute_time * 1000)
             
             if not stake_tx:
                 logger.error("Bot stake failed")
@@ -257,10 +337,37 @@ class TradingBot:
         # Start mempool listener
         await self.mempool_listener.start()
     
+    def get_latency_stats(self) -> Dict[str, Dict[str, float]]:
+        """Get latency statistics"""
+        stats = {}
+        for metric, values in self.latency_metrics.items():
+            if values:
+                stats[metric] = {
+                    "avg": sum(values) / len(values),
+                    "min": min(values),
+                    "max": max(values),
+                    "p50": sorted(values)[len(values) // 2],
+                    "p95": sorted(values)[int(len(values) * 0.95)] if len(values) > 1 else values[0],
+                    "count": len(values)
+                }
+        return stats
+    
     async def stop(self):
         """Stop the trading bot"""
         self.running = False
         await self.mempool_listener.stop()
+        
+        # Print final latency statistics
+        stats = self.get_latency_stats()
+        if stats:
+            logger.info("📊 Final Latency Statistics:")
+            for metric, stat in stats.items():
+                logger.info(
+                    f"  {metric}: avg={stat['avg']:.1f}ms, "
+                    f"min={stat['min']:.1f}ms, max={stat['max']:.1f}ms, "
+                    f"p95={stat['p95']:.1f}ms"
+                )
+        
         logger.info("Trading bot stopped")
 
 
