@@ -101,8 +101,8 @@ class ExecutionEngine:
         if not self.wallet or not self.subtensor:
             return
         
-        # Common stake amounts to pre-sign
-        common_amounts = [10.0, 25.0, 50.0, 100.0]
+        # Common stake amounts to pre-sign (starting from 1 TAO)
+        common_amounts = [1.0, 5.0, 10.0, 25.0, 50.0, 100.0]
         common_netuids = config.monitored_subnets
         
         while True:
