@@ -19,10 +19,11 @@ class BotConfig(BaseModel):
     wallet_hotkey: Optional[str] = os.getenv("WALLET_HOTKEY")
     
     # Trading parameters
-    min_wallet_stake: float = float(os.getenv("MIN_WALLET_STAKE", "10.0"))  # Minimum TAO to trigger
+    min_wallet_stake: float = float(os.getenv("MIN_WALLET_STAKE", "30.0"))  # Minimum TAO to trigger
     max_bot_stake: float = float(os.getenv("MAX_BOT_STAKE", "100.0"))  # Maximum bot stake per trade
     min_expected_profit: float = float(os.getenv("MIN_EXPECTED_PROFIT", "0.05"))  # Minimum profit in TAO
     bot_stake_ratio: float = float(os.getenv("BOT_STAKE_RATIO", "0.5"))  # Bot stake as ratio of wallet stake
+    min_wallet_reserve: float = float(os.getenv("MIN_WALLET_RESERVE", "0.02"))  # Minimum TAO to keep in wallet after staking
     
     # Subnets to monitor
     monitored_subnets: List[int] = [int(x) for x in os.getenv("MONITORED_SUBNETS", "46,19,8").split(",")]
