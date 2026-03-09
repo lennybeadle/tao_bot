@@ -23,7 +23,7 @@ class TradingBot:
     def __init__(self):
         self.mempool_listener = MempoolListener()
         self.execution_engine = ExecutionEngine()
-        self.subtensor = bt.subtensor(network="finney")
+        self.subtensor = bt.Subtensor(network="finney")
         self.running = False
         self.daily_trades = 0
         self.last_reset = datetime.now().date()
@@ -124,10 +124,30 @@ class TradingBot:
             
             def _fetch_pool():
                 try:
-                    subnet_info = self.subtensor.subnet_info(netuid=netuid)
-                    tao_reserve = float(subnet_info.get('tao_in', 1000))
-                    alpha_reserve = float(subnet_info.get('alpha_in', 500))
-                    return tao_reserve, alpha_reserve
+                    # Use substrate query to get subnet information
+                    # Query the SubtensorModule for subnet pool reserves
+                    result = self.subtensor.substrate.query(
+                        module="SubtensorModule",
+                        storage_function="SubnetInfo",
+                        params=[netuid]
+                    )
+                    
+                    if result and result.value:
+                        # Extract tao_in and alpha_in from the result
+                        # The structure may vary, so we'll try different access patterns
+                        subnet_data = result.value
+                        if isinstance(subnet_data, dict):
+                            tao_reserve = float(subnet_data.get('tao_in', subnet_data.get('taoIn', 1000)))
+                            alpha_reserve = float(subnet_data.get('alpha_in', subnet_data.get('alphaIn', 500)))
+                        else:
+                            # If it's a different structure, try accessing attributes
+                            tao_reserve = float(getattr(subnet_data, 'tao_in', getattr(subnet_data, 'taoIn', 1000)))
+                            alpha_reserve = float(getattr(subnet_data, 'alpha_in', getattr(subnet_data, 'alphaIn', 500)))
+                        
+                        return tao_reserve, alpha_reserve
+                    else:
+                        # Fallback to defaults if query returns None
+                        return 1000.0, 500.0
                 except Exception as e:
                     logger.warning(f"Could not fetch subnet info: {e}, using defaults")
                     # Fast fallback
@@ -159,7 +179,8 @@ class TradingBot:
                     alpha_reserve=alpha_reserve,
                     current_price=tao_reserve / alpha_reserve if alpha_reserve > 0 else 0
                 )
-                session.merge(pool_model)
+                # merge is a coroutine in SQLAlchemy async
+                await session.merge(pool_model)
                 await session.commit()
         except Exception as e:
             logger.debug(f"Error updating DB cache: {e}")

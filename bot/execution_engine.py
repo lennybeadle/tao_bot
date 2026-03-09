@@ -19,8 +19,8 @@ class ExecutionEngine:
     """Handles transaction execution with pre-signed transactions and multi-node broadcasting"""
     
     def __init__(self):
-        self.subtensor: Optional[bt.subtensor] = None
-        self.subtensor_nodes: List[bt.subtensor] = []  # Multiple nodes for broadcasting
+        self.subtensor: Optional[bt.Subtensor] = None
+        self.subtensor_nodes: List[bt.Subtensor] = []  # Multiple nodes for broadcasting
         self.wallet: Optional[bt.wallet] = None
         self.active_trades: Dict[str, Dict[str, Any]] = {}
         self.executor = ThreadPoolExecutor(max_workers=4)  # Parallel execution
@@ -48,29 +48,22 @@ class ExecutionEngine:
             # Initialize primary subtensor
             self.subtensor = await loop.run_in_executor(
                 self.executor,
-                lambda: bt.subtensor(network="finney")
+                lambda: bt.Subtensor(network="finney")
             )
             
             # Initialize multiple nodes for broadcasting
-            rpc_endpoints = [
-                config.subtensor_rpc,
+            # Note: Subtensor doesn't support 'endpoint' parameter
+            # Use fallback_endpoints for redundancy, or create separate instances
+            # For multi-node broadcasting, we'll use the primary subtensor
+            # The Subtensor class manages its own connection pool internally
+            fallback_endpoints = [
                 "wss://entrypoint-finney.opentensor.ai:443",
                 "wss://archivelb-finney.opentensor.ai:443",
             ]
             
-            for rpc_url in rpc_endpoints[:3]:  # Connect to up to 3 nodes
-                try:
-                    node = await loop.run_in_executor(
-                        self.executor,
-                        lambda url=rpc_url: bt.subtensor(network="finney", endpoint=url)
-                    )
-                    self.subtensor_nodes.append(node)
-                    logger.info(f"Connected to node: {rpc_url}")
-                except Exception as e:
-                    logger.warning(f"Failed to connect to {rpc_url}: {e}")
-            
-            if not self.subtensor_nodes:
-                self.subtensor_nodes = [self.subtensor]  # Fallback to primary
+            # Use the primary subtensor for all nodes (it handles connection management)
+            # If you need true multi-node broadcasting, consider using SubstrateInterface directly
+            self.subtensor_nodes = [self.subtensor]
             
             if config.wallet_name and config.wallet_hotkey:
                 self.wallet = await loop.run_in_executor(
@@ -182,7 +175,7 @@ class ExecutionEngine:
         if not self.subtensor_nodes:
             return None
         
-        async def _broadcast_single(node: bt.subtensor) -> Optional[str]:
+        async def _broadcast_single(node: bt.Subtensor) -> Optional[str]:
             """Broadcast to a single node"""
             try:
                 loop = asyncio.get_event_loop()

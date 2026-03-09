@@ -180,9 +180,14 @@ class MempoolListener:
         """Subscribe to pending extrinsics via WebSocket (real-time)"""
         try:
             # Use subscription for real-time updates
+            # subscribe_block_headers callback signature: (subscription_id, update_nr, header)
+            def block_header_callback(subscription_id, update_nr, header):
+                # We'll use pending extrinsics polling instead, so this is just a placeholder
+                pass
+            
             subscription_id = await asyncio.to_thread(
                 substrate.subscribe_block_headers,
-                lambda header: None  # We'll use pending extrinsics instead
+                block_header_callback
             )
             
             # Subscribe to pending extrinsics
