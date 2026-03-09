@@ -1,10 +1,13 @@
 """
 Database connection and session management
 """
+import os
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import declarative_base
+from sqlalchemy import select, delete
+from typing import List
 from bot.config import config
-from bot.models import Base
+from bot.models import Base, MonitoredSubnet
 
 # Create async engine
 engine = create_async_engine(
@@ -34,3 +37,50 @@ async def get_db():
             yield session
         finally:
             await session.close()
+
+
+async def get_monitored_subnets() -> List[int]:
+    """Get list of monitored subnet IDs from database"""
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(MonitoredSubnet.subnet_id))
+            subnets = result.scalars().all()
+            return list(subnets) if subnets else []
+    except Exception as e:
+        # If table doesn't exist yet or error, return empty list
+        # Fallback to config will be handled by config.py
+        return []
+
+
+async def set_monitored_subnets(subnet_ids: List[int]):
+    """Update monitored subnets in database"""
+    async with AsyncSessionLocal() as session:
+        try:
+            # Delete all existing
+            result = await session.execute(select(MonitoredSubnet))
+            existing = result.scalars().all()
+            for item in existing:
+                await session.delete(item)
+            
+            # Add new ones
+            for subnet_id in subnet_ids:
+                monitored = MonitoredSubnet(subnet_id=subnet_id)
+                session.add(monitored)
+            
+            await session.commit()
+        except Exception as e:
+            await session.rollback()
+            raise
+
+
+async def init_default_monitored_subnets():
+    """Initialize default monitored subnets from config if database is empty"""
+    try:
+        existing = await get_monitored_subnets()
+        if not existing:
+            # Use default from config or env
+            default_subnets = [int(x) for x in os.getenv("MONITORED_SUBNETS", "46,19,8").split(",")]
+            await set_monitored_subnets(default_subnets)
+    except Exception:
+        # If there's an error, just continue - defaults will be used
+        pass

@@ -55,6 +55,9 @@ class TradingBot:
         # Start background liquidity updater
         asyncio.create_task(self._background_liquidity_updater())
         
+        # Start background config reloader to pick up monitored_subnets changes
+        asyncio.create_task(self._background_config_reloader())
+        
         logger.info("Trading bot initialized")
     
     async def _background_liquidity_updater(self):
@@ -89,6 +92,18 @@ class TradingBot:
             except Exception as e:
                 logger.debug(f"Liquidity updater error: {e}")
                 await asyncio.sleep(5)
+    
+    async def _background_config_reloader(self):
+        """Background task to reload monitored_subnets from database periodically"""
+        while self.running:
+            try:
+                # Reload monitored_subnets from database every 30 seconds
+                await config.reload_monitored_subnets()
+                logger.debug(f"Reloaded monitored subnets: {config.monitored_subnets}")
+                await asyncio.sleep(30)
+            except Exception as e:
+                logger.debug(f"Config reloader error: {e}")
+                await asyncio.sleep(30)
     
     async def _get_subnet_pool(self, netuid: int) -> Optional[SubnetPool]:
         """Get current subnet pool state - optimized with in-memory cache"""

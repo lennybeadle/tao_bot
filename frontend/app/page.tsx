@@ -71,7 +71,7 @@ export default function Home() {
             <Stats stats={stats} />
           </div>
           <div>
-            <ConfigPanel config={config} />
+            <ConfigPanel config={config} onConfigUpdate={loadData} />
           </div>
         </div>
 

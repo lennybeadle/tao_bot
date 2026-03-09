@@ -2,11 +2,17 @@
 Configuration management for TAO staking bot
 """
 import os
+import asyncio
 from typing import List, Optional
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
 load_dotenv()
+
+
+def _get_default_monitored_subnets() -> List[int]:
+    """Get default monitored subnets from environment variable"""
+    return [int(x) for x in os.getenv("MONITORED_SUBNETS", "46,19,8").split(",")]
 
 
 class BotConfig(BaseModel):
@@ -25,8 +31,9 @@ class BotConfig(BaseModel):
     bot_stake_ratio: float = float(os.getenv("BOT_STAKE_RATIO", "0.5"))  # Bot stake as ratio of wallet stake
     min_wallet_reserve: float = float(os.getenv("MIN_WALLET_RESERVE", "0.02"))  # Minimum TAO to keep in wallet after staking
     
-    # Subnets to monitor
-    monitored_subnets: List[int] = [int(x) for x in os.getenv("MONITORED_SUBNETS", "46,19,8").split(",")]
+    # Subnets to monitor - loaded from database, cached
+    _monitored_subnets_cache: Optional[List[int]] = None
+    _monitored_subnets_cache_loaded: bool = False
     
     # Risk management
     max_daily_trades: int = int(os.getenv("MAX_DAILY_TRADES", "50"))
@@ -43,6 +50,60 @@ class BotConfig(BaseModel):
     # API
     api_host: str = os.getenv("API_HOST", "0.0.0.0")
     api_port: int = int(os.getenv("API_PORT", "8000"))
+    
+    @property
+    def monitored_subnets(self) -> List[int]:
+        """Get monitored subnets from database cache, with fallback to env var"""
+        # If not loaded yet, try to load from DB (synchronous fallback to env)
+        if not self._monitored_subnets_cache_loaded:
+            try:
+                # Try to load from database synchronously
+                loop = None
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                
+                if loop.is_running():
+                    # If loop is running, we can't use it synchronously
+                    # Fall back to env var for now
+                    self._monitored_subnets_cache = _get_default_monitored_subnets()
+                else:
+                    # Load from database
+                    from bot.database import get_monitored_subnets
+                    subnets = loop.run_until_complete(get_monitored_subnets())
+                    if subnets:
+                        self._monitored_subnets_cache = subnets
+                    else:
+                        # Fallback to env var
+                        self._monitored_subnets_cache = _get_default_monitored_subnets()
+            except Exception:
+                # On any error, fall back to env var
+                self._monitored_subnets_cache = _get_default_monitored_subnets()
+            
+            self._monitored_subnets_cache_loaded = True
+        
+        return self._monitored_subnets_cache or _get_default_monitored_subnets()
+    
+    async def reload_monitored_subnets(self):
+        """Reload monitored subnets from database"""
+        try:
+            from bot.database import get_monitored_subnets
+            subnets = await get_monitored_subnets()
+            if subnets:
+                self._monitored_subnets_cache = subnets
+            else:
+                self._monitored_subnets_cache = _get_default_monitored_subnets()
+        except Exception:
+            self._monitored_subnets_cache = _get_default_monitored_subnets()
+        
+        self._monitored_subnets_cache_loaded = True
+    
+    def invalidate_monitored_subnets_cache(self):
+        """Invalidate the cache to force reload on next access"""
+        self._monitored_subnets_cache_loaded = False
+        self._monitored_subnets_cache = None
 
 
 config = BotConfig()

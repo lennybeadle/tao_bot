@@ -72,3 +72,12 @@ class SubnetPool(Base):
     
     # Metadata
     last_updated = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class MonitoredSubnet(Base):
+    """Track which subnets are being monitored"""
+    __tablename__ = "monitored_subnets"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    subnet_id = Column(Integer, unique=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow)

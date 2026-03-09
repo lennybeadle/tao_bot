@@ -10,7 +10,7 @@ from typing import List, Optional
 from datetime import datetime, timedelta
 from pydantic import BaseModel
 
-from bot.database import get_db, AsyncSessionLocal
+from bot.database import get_db, AsyncSessionLocal, get_monitored_subnets, set_monitored_subnets
 from bot.models import Trade, Wallet, SubnetPool as SubnetPoolModel
 from bot.config import config
 
@@ -194,6 +194,9 @@ async def get_wallets(
 @app.get("/api/config", response_model=ConfigResponse)
 async def get_config():
     """Get bot configuration"""
+    # Reload monitored_subnets from database to get latest
+    await config.reload_monitored_subnets()
+    
     return ConfigResponse(
         min_wallet_stake=config.min_wallet_stake,
         max_bot_stake=config.max_bot_stake,
@@ -203,6 +206,38 @@ async def get_config():
         max_daily_trades=config.max_daily_trades,
         max_slippage=config.max_slippage
     )
+
+
+class UpdateMonitoredSubnetsRequest(BaseModel):
+    monitored_subnets: List[int]
+
+
+@app.put("/api/config/monitored-subnets")
+async def update_monitored_subnets(request: UpdateMonitoredSubnetsRequest):
+    """Update monitored subnets"""
+    try:
+        # Validate subnet IDs are positive integers
+        if not all(isinstance(s, int) and s > 0 for s in request.monitored_subnets):
+            raise HTTPException(
+                status_code=400,
+                detail="All subnet IDs must be positive integers"
+            )
+        
+        # Update in database
+        await set_monitored_subnets(request.monitored_subnets)
+        
+        # Invalidate cache so config reloads from DB
+        config.invalidate_monitored_subnets_cache()
+        
+        # Reload to update cache
+        await config.reload_monitored_subnets()
+        
+        return {
+            "success": True,
+            "monitored_subnets": config.monitored_subnets
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/pools")
