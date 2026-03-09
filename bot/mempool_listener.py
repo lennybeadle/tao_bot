@@ -98,10 +98,26 @@ class MempoolListener:
     async def _fetch_from_substrate(self, substrate: SubstrateInterface) -> Dict[str, Any]:
         """Fetch pending extrinsics from a substrate node"""
         try:
-            pending = substrate.rpc_request("author_pendingExtrinsics", [])
-            return {tx.get("hash", ""): tx for tx in pending if tx.get("hash")}
+            response = substrate.rpc_request("author_pendingExtrinsics", [])
+            
+            # RPC response is typically a dict with 'result' key, or could be the list directly
+            if isinstance(response, dict):
+                pending = response.get("result", [])
+            elif isinstance(response, list):
+                pending = response
+            else:
+                pending = []
+            
+            if pending:
+                logger.info(f"📊 Fetched {len(pending)} pending transactions from mempool")
+            # Ensure pending is a list of dicts before processing
+            if not isinstance(pending, list):
+                return {}
+            
+            tx_dict = {tx.get("hash", ""): tx for tx in pending if isinstance(tx, dict) and tx.get("hash")}
+            return tx_dict
         except Exception as e:
-            logger.debug(f"Error fetching from substrate: {e}")
+            logger.warning(f"Error fetching from substrate: {e}")
             return {}
     
     async def _safe_callback(self, callback: Callable, data: Dict[str, Any]):
@@ -194,13 +210,21 @@ class MempoolListener:
             while self.running:
                 try:
                     # Get pending extrinsics via subscription
-                    pending = await asyncio.to_thread(
+                    response = await asyncio.to_thread(
                         substrate.rpc_request,
                         "author_pendingExtrinsics",
                         []
                     )
                     
-                    if pending:
+                    # RPC response is typically a dict with 'result' key, or could be the list directly
+                    if isinstance(response, dict):
+                        pending = response.get("result", [])
+                    elif isinstance(response, list):
+                        pending = response
+                    else:
+                        pending = []
+                    
+                    if pending and isinstance(pending, list):
                         await self._process_pending_batch(pending)
                     
                     await asyncio.sleep(0.01)  # 10ms check interval
