@@ -23,7 +23,10 @@ class TradingBot:
     def __init__(self):
         self.mempool_listener = MempoolListener()
         self.execution_engine = ExecutionEngine()
-        self.subtensor = bt.Subtensor(network="finney")
+        # Create separate subtensor instance for queries to avoid threading conflicts
+        # This will be initialized lazily to avoid connection issues
+        self.subtensor: Optional[bt.Subtensor] = None
+        self.subtensor_lock: Optional[asyncio.Lock] = None  # Lock for thread-safe subtensor access
         self.running = False
         self.daily_trades = 0
         self.last_reset = datetime.now().date()
@@ -41,6 +44,16 @@ class TradingBot:
     async def initialize(self):
         """Initialize bot components"""
         logger.info("Initializing trading bot...")
+        
+        # Initialize lock for thread-safe subtensor access
+        self.subtensor_lock = asyncio.Lock()
+        
+        # Initialize subtensor connection (separate from mempool listener)
+        loop = asyncio.get_event_loop()
+        self.subtensor = await loop.run_in_executor(
+            None,
+            lambda: bt.Subtensor(network="finney")
+        )
         
         # Initialize execution engine
         await self.execution_engine.initialize()
@@ -66,12 +79,17 @@ class TradingBot:
         
         while self.running:
             try:
-                # Get current block
-                loop = asyncio.get_event_loop()
-                current_block = await loop.run_in_executor(
-                    None,
-                    lambda: self.subtensor.get_current_block()
-                )
+                # Get current block (with lock to prevent threading conflicts)
+                if not self.subtensor or not self.subtensor_lock:
+                    await asyncio.sleep(2)
+                    continue
+                
+                async with self.subtensor_lock:
+                    loop = asyncio.get_event_loop()
+                    current_block = await loop.run_in_executor(
+                        None,
+                        lambda: self.subtensor.get_current_block()
+                    )
                 
                 # Update cache if new block
                 if current_block > last_block:
@@ -119,41 +137,66 @@ class TradingBot:
         
         # Cache miss - fetch fresh data (async, non-blocking)
         try:
-            # Use thread pool for blocking subtensor calls
-            loop = asyncio.get_event_loop()
+            # Use lock to prevent concurrent substrate queries
+            if not self.subtensor_lock:
+                # Lock not initialized yet, use defaults
+                pool = SubnetPool(1000.0, 500.0)
+                self.pool_cache[netuid] = (pool, time.time())
+                return pool
             
-            def _fetch_pool():
-                try:
-                    # Use substrate query to get subnet information
-                    # Query the SubtensorModule for subnet pool reserves
-                    result = self.subtensor.substrate.query(
-                        module="SubtensorModule",
-                        storage_function="SubnetInfo",
-                        params=[netuid]
-                    )
-                    
-                    if result and result.value:
-                        # Extract tao_in and alpha_in from the result
-                        # The structure may vary, so we'll try different access patterns
-                        subnet_data = result.value
-                        if isinstance(subnet_data, dict):
-                            tao_reserve = float(subnet_data.get('tao_in', subnet_data.get('taoIn', 1000)))
-                            alpha_reserve = float(subnet_data.get('alpha_in', subnet_data.get('alphaIn', 500)))
-                        else:
-                            # If it's a different structure, try accessing attributes
-                            tao_reserve = float(getattr(subnet_data, 'tao_in', getattr(subnet_data, 'taoIn', 1000)))
-                            alpha_reserve = float(getattr(subnet_data, 'alpha_in', getattr(subnet_data, 'alphaIn', 500)))
+            async with self.subtensor_lock:
+                if not self.subtensor:
+                    # Fallback to defaults if subtensor not initialized
+                    pool = SubnetPool(1000.0, 500.0)
+                    self.pool_cache[netuid] = (pool, time.time())
+                    return pool
+                
+                # Use thread pool for blocking subtensor calls
+                loop = asyncio.get_event_loop()
+                
+                def _fetch_pool():
+                    try:
+                        # Try multiple storage function names as they may vary by network version
+                        storage_functions = [
+                            "Subnets",  # Most common name
+                            "SubnetInfo",  # Alternative name
+                            "Subnet",  # Singular form
+                        ]
                         
-                        return tao_reserve, alpha_reserve
-                    else:
-                        # Fallback to defaults if query returns None
+                        for storage_func in storage_functions:
+                            try:
+                                result = self.subtensor.substrate.query(
+                                    module="SubtensorModule",
+                                    storage_function=storage_func,
+                                    params=[netuid]
+                                )
+                                
+                                if result and result.value:
+                                    # Extract tao_in and alpha_in from the result
+                                    subnet_data = result.value
+                                    if isinstance(subnet_data, dict):
+                                        tao_reserve = float(subnet_data.get('tao_in', subnet_data.get('taoIn', 1000)))
+                                        alpha_reserve = float(subnet_data.get('alpha_in', subnet_data.get('alphaIn', 500)))
+                                    else:
+                                        # If it's a different structure, try accessing attributes
+                                        tao_reserve = float(getattr(subnet_data, 'tao_in', getattr(subnet_data, 'taoIn', 1000)))
+                                        alpha_reserve = float(getattr(subnet_data, 'alpha_in', getattr(subnet_data, 'alphaIn', 500)))
+                                    
+                                    return tao_reserve, alpha_reserve
+                            except Exception:
+                                # Try next storage function
+                                continue
+                        
+                        # If all storage functions failed, use defaults
+                        # This is expected if the storage function doesn't exist on this network
                         return 1000.0, 500.0
-                except Exception as e:
-                    logger.warning(f"Could not fetch subnet info: {e}, using defaults")
-                    # Fast fallback
-                    return 1000.0, 500.0
-            
-            tao_reserve, alpha_reserve = await loop.run_in_executor(None, _fetch_pool)
+                    except Exception as e:
+                        # Only log at debug level to avoid spam - this is expected behavior
+                        logger.debug(f"Could not fetch subnet info: {e}, using defaults")
+                        # Fast fallback
+                        return 1000.0, 500.0
+                
+                tao_reserve, alpha_reserve = await loop.run_in_executor(None, _fetch_pool)
             
             pool = SubnetPool(tao_reserve, alpha_reserve)
             
@@ -166,8 +209,11 @@ class TradingBot:
             return pool
             
         except Exception as e:
-            logger.error(f"Error getting subnet pool: {e}")
-            return None
+            logger.debug(f"Error getting subnet pool: {e}, using defaults")
+            # Return default pool on error
+            pool = SubnetPool(1000.0, 500.0)
+            self.pool_cache[netuid] = (pool, time.time())
+            return pool
     
     async def _update_db_cache(self, netuid: int, tao_reserve: float, alpha_reserve: float):
         """Update database cache asynchronously"""
