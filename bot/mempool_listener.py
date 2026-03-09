@@ -68,7 +68,6 @@ class MempoolListener:
         for result in results:
             if isinstance(result, dict):
                 all_txs.update(result)
-        
         # Process new transactions
         current_time = time.time()
         for tx_hash, tx_data in all_txs.items():
@@ -101,12 +100,7 @@ class MempoolListener:
             response = substrate.rpc_request("author_pendingExtrinsics", [])
             
             # RPC response is typically a dict with 'result' key, or could be the list directly
-            if isinstance(response, dict):
-                pending = response.get("result", [])
-            elif isinstance(response, list):
-                pending = response
-            else:
-                pending = []
+            pending = response.get("result", [])
             
             if pending:
                 logger.info(f"📊 Fetched {len(pending)} pending transactions from mempool")
@@ -116,21 +110,8 @@ class MempoolListener:
             
             # Handle both dict format (with hash) and hex string format
             tx_dict = {}
-            for idx, tx in enumerate(pending):
-                if isinstance(tx, dict):
-                    tx_hash = tx.get("hash", "")
-                    if tx_hash:
-                        tx_dict[tx_hash] = tx
-                    else:
-                        # Use index as key if no hash
-                        tx_dict[f"tx_{idx}"] = tx
-                elif isinstance(tx, str):
-                    # Hex string - use index or first few chars as key
-                    tx_dict[f"tx_{idx}"] = tx
-                else:
-                    # Unknown format - save it anyway
-                    tx_dict[f"tx_{idx}"] = str(tx)
-            
+            for idx, tx in enumerate(pending):        
+                tx_dict[f"tx_{idx}"] = tx          
             return tx_dict
         except Exception as e:
             logger.warning(f"Error fetching from substrate: {e}")
