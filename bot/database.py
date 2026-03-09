@@ -7,7 +7,7 @@ from sqlalchemy.orm import declarative_base
 from sqlalchemy import select, delete
 from typing import List
 from bot.config import config
-from bot.models import Base, MonitoredSubnet
+from bot.models import Base, MonitoredSubnet, Wallet
 
 # Create async engine
 engine = create_async_engine(
@@ -84,3 +84,42 @@ async def init_default_monitored_subnets():
     except Exception:
         # If there's an error, just continue - defaults will be used
         pass
+
+
+async def get_allowed_wallet_addresses() -> List[str]:
+    """Get list of allowed wallet addresses from database"""
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(Wallet.address).where(Wallet.is_allowed == True)
+            )
+            addresses = result.scalars().all()
+            return list(addresses) if addresses else []
+    except Exception as e:
+        # If table doesn't exist yet or error, return empty list
+        return []
+
+
+async def set_wallet_allowed(address: str, is_allowed: bool = True):
+    """Set wallet allowed status - creates wallet if it doesn't exist"""
+    async with AsyncSessionLocal() as session:
+        try:
+            # Try to find existing wallet
+            result = await session.execute(
+                select(Wallet).where(Wallet.address == address)
+            )
+            wallet = result.scalar_one_or_none()
+            
+            if wallet:
+                # Update existing wallet
+                wallet.is_allowed = is_allowed
+            else:
+                # Create new wallet with is_allowed set
+                wallet = Wallet(address=address, is_allowed=is_allowed)
+                session.add(wallet)
+            
+            await session.commit()
+            return wallet
+        except Exception as e:
+            await session.rollback()
+            raise

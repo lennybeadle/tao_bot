@@ -53,6 +53,7 @@ class Wallet(Base):
     # Tracking
     last_seen = Column(DateTime, default=datetime.utcnow)
     is_tracked = Column(Boolean, default=True)
+    is_allowed = Column(Boolean, default=False)  # Whether bot should stake for this wallet
     
     # Preferred subnets
     preferred_subnets = Column(String, nullable=True)  # JSON array of subnet IDs

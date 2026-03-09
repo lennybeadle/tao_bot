@@ -15,6 +15,15 @@ def _get_default_monitored_subnets() -> List[int]:
     return [int(x) for x in os.getenv("MONITORED_SUBNETS", "46,19,8").split(",")]
 
 
+def _get_allowed_wallet_addresses() -> List[str]:
+    """Get allowed wallet addresses from environment variable (comma-separated)"""
+    addresses_str = os.getenv("ALLOWED_WALLET_ADDRESSES", "")
+    if not addresses_str:
+        return []  # Empty list means all wallets are allowed (backward compatible)
+    # Split by comma and strip whitespace
+    return [addr.strip() for addr in addresses_str.split(",") if addr.strip()]
+
+
 class BotConfig(BaseModel):
     """Bot configuration settings"""
     # RPC endpoints
@@ -35,6 +44,10 @@ class BotConfig(BaseModel):
     _monitored_subnets_cache: Optional[List[int]] = None
     _monitored_subnets_cache_loaded: bool = False
     
+    # Allowed wallet addresses - loaded from database, cached
+    _allowed_wallet_addresses_cache: Optional[List[str]] = None
+    _allowed_wallet_addresses_cache_loaded: bool = False
+    
     # Risk management
     max_daily_trades: int = int(os.getenv("MAX_DAILY_TRADES", "50"))
     max_slippage: float = float(os.getenv("MAX_SLIPPAGE", "0.05"))  # 5% max slippage
@@ -50,6 +63,9 @@ class BotConfig(BaseModel):
     # API
     api_host: str = os.getenv("API_HOST", "0.0.0.0")
     api_port: int = int(os.getenv("API_PORT", "8000"))
+    
+    # Wallet filtering - will be loaded from database
+    _allowed_wallet_addresses_static: List[str] = _get_allowed_wallet_addresses()
     
     @property
     def monitored_subnets(self) -> List[int]:
@@ -104,6 +120,60 @@ class BotConfig(BaseModel):
         """Invalidate the cache to force reload on next access"""
         self._monitored_subnets_cache_loaded = False
         self._monitored_subnets_cache = None
+    
+    @property
+    def allowed_wallet_addresses(self) -> List[str]:
+        """Get allowed wallet addresses from database cache, with fallback to env var"""
+        # If not loaded yet, try to load from DB (synchronous fallback to env)
+        if not self._allowed_wallet_addresses_cache_loaded:
+            try:
+                # Try to load from database synchronously
+                loop = None
+                try:
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                
+                if loop.is_running():
+                    # If loop is running, we can't use it synchronously
+                    # Fall back to env var for now
+                    self._allowed_wallet_addresses_cache = self._allowed_wallet_addresses_static
+                else:
+                    # Load from database
+                    from bot.database import get_allowed_wallet_addresses
+                    addresses = loop.run_until_complete(get_allowed_wallet_addresses())
+                    if addresses:
+                        self._allowed_wallet_addresses_cache = addresses
+                    else:
+                        # Fallback to env var (empty list means all wallets allowed)
+                        self._allowed_wallet_addresses_cache = self._allowed_wallet_addresses_static
+            except Exception:
+                # On any error, fall back to env var
+                self._allowed_wallet_addresses_cache = self._allowed_wallet_addresses_static
+            
+            self._allowed_wallet_addresses_cache_loaded = True
+        
+        return self._allowed_wallet_addresses_cache or []
+    
+    async def reload_allowed_wallet_addresses(self):
+        """Reload allowed wallet addresses from database"""
+        try:
+            from bot.database import get_allowed_wallet_addresses
+            addresses = await get_allowed_wallet_addresses()
+            if addresses:
+                self._allowed_wallet_addresses_cache = addresses
+            else:
+                self._allowed_wallet_addresses_cache = self._allowed_wallet_addresses_static
+        except Exception:
+            self._allowed_wallet_addresses_cache = self._allowed_wallet_addresses_static
+        
+        self._allowed_wallet_addresses_cache_loaded = True
+    
+    def invalidate_allowed_wallet_addresses_cache(self):
+        """Invalidate the cache to force reload on next access"""
+        self._allowed_wallet_addresses_cache_loaded = False
+        self._allowed_wallet_addresses_cache = None
 
 
 config = BotConfig()

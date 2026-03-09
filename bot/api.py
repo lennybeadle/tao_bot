@@ -10,7 +10,7 @@ from typing import List, Optional
 from datetime import datetime, timedelta
 from pydantic import BaseModel
 
-from bot.database import get_db, AsyncSessionLocal, get_monitored_subnets, set_monitored_subnets
+from bot.database import get_db, AsyncSessionLocal, get_monitored_subnets, set_monitored_subnets, get_allowed_wallet_addresses, set_wallet_allowed
 from bot.models import Trade, Wallet, SubnetPool as SubnetPoolModel
 from bot.config import config
 
@@ -57,6 +57,7 @@ class WalletResponse(BaseModel):
     avg_price_impact: float
     last_seen: datetime
     is_tracked: bool
+    is_allowed: bool
     
     class Config:
         from_attributes = True
@@ -79,6 +80,7 @@ class ConfigResponse(BaseModel):
     monitored_subnets: List[int]
     max_daily_trades: int
     max_slippage: float
+    allowed_wallet_addresses: List[str]
 
 
 @app.get("/")
@@ -194,8 +196,9 @@ async def get_wallets(
 @app.get("/api/config", response_model=ConfigResponse)
 async def get_config():
     """Get bot configuration"""
-    # Reload monitored_subnets from database to get latest
+    # Reload monitored_subnets and allowed wallets from database to get latest
     await config.reload_monitored_subnets()
+    await config.reload_allowed_wallet_addresses()
     
     return ConfigResponse(
         min_wallet_stake=config.min_wallet_stake,
@@ -204,7 +207,8 @@ async def get_config():
         bot_stake_ratio=config.bot_stake_ratio,
         monitored_subnets=config.monitored_subnets,
         max_daily_trades=config.max_daily_trades,
-        max_slippage=config.max_slippage
+        max_slippage=config.max_slippage,
+        allowed_wallet_addresses=config.allowed_wallet_addresses
     )
 
 
@@ -256,6 +260,72 @@ async def get_pools(db: AsyncSession = Depends(get_db)):
         }
         for p in pools
     ]
+
+
+class SetWalletAllowedRequest(BaseModel):
+    address: str
+    is_allowed: bool = True
+
+
+@app.put("/api/wallets/allowed")
+async def set_wallet_allowed_status(request: SetWalletAllowedRequest, db: AsyncSession = Depends(get_db)):
+    """Set wallet allowed status for staking"""
+    try:
+        if not request.address or not request.address.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Wallet address is required"
+            )
+        
+        address = request.address.strip()
+        
+        # Update wallet in database
+        wallet = await set_wallet_allowed(address, request.is_allowed)
+        
+        # Invalidate cache so config reloads from DB
+        config.invalidate_allowed_wallet_addresses_cache()
+        
+        # Reload to update cache
+        await config.reload_allowed_wallet_addresses()
+        
+        return {
+            "success": True,
+            "wallet": {
+                "id": wallet.id,
+                "address": wallet.address,
+                "is_allowed": wallet.is_allowed
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/wallets/allowed")
+async def get_allowed_wallets(db: AsyncSession = Depends(get_db)):
+    """Get all allowed wallets"""
+    try:
+        # Reload from database to get latest
+        await config.reload_allowed_wallet_addresses()
+        
+        # Get full wallet info for allowed wallets
+        result = await db.execute(
+            select(Wallet).where(Wallet.is_allowed == True)
+        )
+        wallets = result.scalars().all()
+        
+        return [
+            {
+                "id": w.id,
+                "address": w.address,
+                "is_allowed": w.is_allowed,
+                "total_stakes": w.total_stakes,
+                "total_staked_amount": w.total_staked_amount,
+                "last_seen": w.last_seen.isoformat() if w.last_seen else None
+            }
+            for w in wallets
+        ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":
