@@ -156,7 +156,8 @@ class MempoolListener:
             # Extract wallet address for filtering
             hotkey_ss58 = args_dict.get("hotkey_ss58", "")
             allowed_wallets = config.allowed_wallet_addresses
-            if hotkey_ss58 not in allowed_wallets:
+            # Only filter if allowed_wallets is configured (non-empty)
+            if allowed_wallets and hotkey_ss58 not in allowed_wallets:
                 return None
             # Process add_stake transaction
             amount = args_dict.get("amount")
@@ -178,7 +179,6 @@ class MempoolListener:
                 "timestamp": time.time()
             }
             
-            return None
             
         except Exception as e:
             logger.debug(f"Error decoding transaction: {e}")

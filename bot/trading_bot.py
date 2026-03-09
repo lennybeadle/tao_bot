@@ -253,15 +253,8 @@ class TradingBot:
         wallet_stake = tx_data["amount"]
         wallet_address = tx_data.get("hotkey_ss58", "unknown")
         
-        # Check if wallet address is in allowed list (if configured)
-        if config.allowed_wallet_addresses:
-            if wallet_address not in config.allowed_wallet_addresses:
-                logger.debug(f"⏭️ Skipping wallet {wallet_address} - not in allowed list")
-                return
-        
-        # Ultra-fast filter: quick threshold check before any computation
-        if wallet_stake < config.min_wallet_stake:
-            return
+        # Note: allowed_wallet_addresses and min_wallet_stake filtering
+        # is already done in _decode_transaction_fast() in mempool_listener.py
         
         logger.info(f"⚡ DETECTED: {wallet_stake} TAO stake on subnet {netuid}")
         
