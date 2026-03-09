@@ -110,11 +110,27 @@ class MempoolListener:
             
             if pending:
                 logger.info(f"📊 Fetched {len(pending)} pending transactions from mempool")
-            # Ensure pending is a list of dicts before processing
+            # Ensure pending is a list before processing
             if not isinstance(pending, list):
                 return {}
             
-            tx_dict = {tx.get("hash", ""): tx for tx in pending if isinstance(tx, dict) and tx.get("hash")}
+            # Handle both dict format (with hash) and hex string format
+            tx_dict = {}
+            for idx, tx in enumerate(pending):
+                if isinstance(tx, dict):
+                    tx_hash = tx.get("hash", "")
+                    if tx_hash:
+                        tx_dict[tx_hash] = tx
+                    else:
+                        # Use index as key if no hash
+                        tx_dict[f"tx_{idx}"] = tx
+                elif isinstance(tx, str):
+                    # Hex string - use index or first few chars as key
+                    tx_dict[f"tx_{idx}"] = tx
+                else:
+                    # Unknown format - save it anyway
+                    tx_dict[f"tx_{idx}"] = str(tx)
+            
             return tx_dict
         except Exception as e:
             logger.warning(f"Error fetching from substrate: {e}")
