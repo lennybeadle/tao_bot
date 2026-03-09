@@ -135,7 +135,8 @@ class MempoolListener:
             if call_module != "SubtensorModule":
                 return None
             
-            if call_function not in ("add_stake", "remove_stake"):
+            # Only listen to add_stake transactions (not remove_stake)
+            if call_function != "add_stake":
                 return None
             
             # Fast arg extraction using dict comprehension
@@ -152,36 +153,30 @@ class MempoolListener:
             if netuid not in config.monitored_subnets:
                 return None
             
-            if call_function == "add_stake":
-                amount = args_dict.get("amount")
-                if amount is None:
-                    return None
-                
-                amount = float(amount) / 1e9  # RAO to TAO
-                
-                # Fast threshold check
-                if amount < config.min_wallet_stake:
-                    return None
-                
-                return {
-                    "type": "stake",
-                    "netuid": netuid,
-                    "amount": amount,
-                    "hotkey_ss58": args_dict.get("hotkey_ss58", ""),
-                    "tx_hash": tx.get("hash", ""),
-                    "timestamp": time.time()
-                }
+            # Extract wallet address for filtering
+            hotkey_ss58 = args_dict.get("hotkey_ss58", "")
+            allowed_wallets = config.allowed_wallet_addresses
+            if hotkey_ss58 not in allowed_wallets:
+                return None
+            # Process add_stake transaction
+            amount = args_dict.get("amount")
+            if amount is None:
+                return None
             
-            elif call_function == "remove_stake":
-                amount = args_dict.get("amount")
-                return {
-                    "type": "unstake",
-                    "netuid": netuid,
-                    "amount": float(amount) / 1e9 if amount else None,
-                    "hotkey_ss58": args_dict.get("hotkey_ss58", ""),
-                    "tx_hash": tx.get("hash", ""),
-                    "timestamp": time.time()
-                }
+            amount = float(amount) / 1e9  # RAO to TAO
+            
+            # Fast threshold check
+            if amount < config.min_wallet_stake:
+                return None
+            
+            return {
+                "type": "stake",
+                "netuid": netuid,
+                "amount": amount,
+                "hotkey_ss58": hotkey_ss58,
+                "tx_hash": tx.get("hash", ""),
+                "timestamp": time.time()
+            }
             
             return None
             
