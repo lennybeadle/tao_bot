@@ -272,8 +272,6 @@ class TradingBot:
             "wallet_address": wallet_address,
             "wallet_stake": wallet_stake,
             "bot_stake": bot_stake,
-            "price_before": None,  # No longer using pool
-            "expected_profit": None,  # No longer calculating profit
             "status": "pending",
             "wallet_tx": tx_data.get("tx_hash")
         }
@@ -335,7 +333,6 @@ class TradingBot:
                 
                 # Calculate actual profit (simplified)
                 # In production, you'd query the actual balance change
-                trade_data["actual_profit"] = trade_data["expected_profit"]
             
             # Record trade asynchronously (non-blocking)
             await self.execution_engine.record_trade_async(trade_data)

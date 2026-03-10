@@ -15,7 +15,6 @@ export default function Dashboard({ trades }: DashboardProps) {
     .map((t, index) => ({
       name: `Trade ${t.id}`,
       profit: t.actual_profit || 0,
-      expected: t.expected_profit,
     }))
 
   // Prepare daily profit data

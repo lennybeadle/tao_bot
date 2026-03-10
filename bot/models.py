@@ -22,9 +22,7 @@ class Trade(Base):
     bot_stake = Column(Float)
     
     # Price information
-    price_before = Column(Float)
     price_after = Column(Float)
-    expected_profit = Column(Float)
     actual_profit = Column(Float, nullable=True)
     
     # Transaction hashes

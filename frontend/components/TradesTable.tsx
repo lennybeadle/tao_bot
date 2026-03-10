@@ -38,7 +38,6 @@ export default function TradesTable({ trades }: TradesTableProps) {
               <th className="text-left p-3 text-sm text-gray-400">Wallet</th>
               <th className="text-right p-3 text-sm text-gray-400">Wallet Stake</th>
               <th className="text-right p-3 text-sm text-gray-400">Bot Stake</th>
-              <th className="text-right p-3 text-sm text-gray-400">Expected Profit</th>
               <th className="text-right p-3 text-sm text-gray-400">Actual Profit</th>
               <th className="text-center p-3 text-sm text-gray-400">Status</th>
             </tr>
@@ -70,9 +69,6 @@ export default function TradesTable({ trades }: TradesTableProps) {
                   </td>
                   <td className="p-3 text-sm text-right">
                     {trade.bot_stake.toFixed(4)} TAO
-                  </td>
-                  <td className="p-3 text-sm text-right text-accent-buy">
-                    +{trade.expected_profit.toFixed(4)} TAO
                   </td>
                   <td className="p-3 text-sm text-right">
                     {trade.actual_profit !== null ? (

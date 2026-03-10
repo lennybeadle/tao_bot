@@ -34,9 +34,7 @@ class TradeResponse(BaseModel):
     wallet_address: str
     wallet_stake: float
     bot_stake: float
-    price_before: float
     price_after: Optional[float]
-    expected_profit: float
     actual_profit: Optional[float]
     bot_stake_tx: Optional[str]
     bot_unstake_tx: Optional[str]
