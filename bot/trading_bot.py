@@ -234,9 +234,6 @@ class TradingBot:
     async def _handle_stake_detection(self, tx_data: Dict[str, Any]):
         """Handle detected stake transaction - optimized for speed with latency tracking"""
         import time
-        pipeline_start = time.time()
-        detect_time = tx_data.get("timestamp", pipeline_start)
-        logger.info(f"---bot---")
         netuid = tx_data["netuid"]
         wallet_stake = tx_data["amount"]
         wallet_address = tx_data.get("hotkey_ss58", "unknown")
@@ -244,9 +241,7 @@ class TradingBot:
         # Note: allowed_wallet_addresses and min_wallet_stake filtering
         # is already done in _decode_transaction_fast() in mempool_listener.py
         
-        logger.info(f"⚡ DETECTED: {wallet_stake} TAO stake on subnet {netuid}")
         
-        decision_start = time.time()
         
         # Get pool (cached, should be <1ms)
         pool = await self._get_subnet_pool(netuid)
@@ -262,7 +257,6 @@ class TradingBot:
             min_profit=config.min_expected_profit
         )
         
-        decision_time = time.time() - decision_start
         
         if not result:
             return
@@ -273,7 +267,6 @@ class TradingBot:
             f"✅ PROFITABLE! Bot: {optimal_stake} TAO, "
             f"Profit: {expected_profit:.4f} TAO, "
             f"Move: {price_move:.2f}%, "
-            f"Decision: {decision_time*1000:.1f}ms"
         )
         
         # Create trade data
@@ -291,8 +284,7 @@ class TradingBot:
         }
         
         # Execute trade immediately (don't await - fire and continue)
-        execute_start = time.time()
-        asyncio.create_task(self._execute_trade(trade_id, trade_data, pool, execute_start))
+        asyncio.create_task(self._execute_trade(trade_id, trade_data, pool))
         
         # Record total pipeline latency
     
@@ -302,25 +294,20 @@ class TradingBot:
         trade_id: str,
         trade_data: Dict[str, Any],
         pool: SubnetPool,
-        execute_start: float
     ):
         """Execute front-run trade with latency tracking"""
-        import time
         try:
             netuid = trade_data["subnet_id"]
             bot_stake = trade_data["bot_stake"]
             
             # Step 1: Bot stakes
             logger.info(f"Executing bot stake: {bot_stake} TAO on subnet {netuid}")
-            stake_start = time.time()
             stake_tx = await self.execution_engine.execute_stake(
                 netuid=netuid,
                 amount=bot_stake,
                 trade_id=trade_id
             )
             
-            execute_time = time.time() - execute_start
-            self._record_latency("decision_to_execute", execute_time * 1000)
             
             if not stake_tx:
                 logger.error("Bot stake failed")
