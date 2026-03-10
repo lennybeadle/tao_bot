@@ -86,14 +86,12 @@ class MempoolListener:
     def _decode_extrinsic(self, substrate: SubstrateInterface, extrinsic_hex):
 
         try:
-            logger.info("--1---")
             extrinsic = substrate.decode_scale(
                 "Extrinsic",
                 ScaleBytes(extrinsic_hex)
             )
-            logger.info("--2---")
 
-            call = extrinsic.value["call"]
+            call = extrinsic["call"]
 
             call_module = call["call_module"]
             call_function = call["call_function"]
