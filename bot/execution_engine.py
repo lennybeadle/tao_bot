@@ -21,7 +21,7 @@ class ExecutionEngine:
     def __init__(self):
         self.subtensor: Optional[bt.Subtensor] = None
         self.subtensor_nodes: List[bt.Subtensor] = []  # Multiple nodes for broadcasting
-        self.wallet: Optional[bt.wallet] = None
+        self.wallet: Optional[bt.Wallet] = None
         self.active_trades: Dict[str, Dict[str, Any]] = {}
         self.executor = ThreadPoolExecutor(max_workers=4)  # Parallel execution
         
@@ -68,7 +68,7 @@ class ExecutionEngine:
             if config.wallet_name and config.wallet_hotkey:
                 self.wallet = await loop.run_in_executor(
                     self.executor,
-                    lambda: bt.wallet(
+                    lambda: bt.Wallet(
                         name=config.wallet_name,
                         hotkey=config.wallet_hotkey
                     )

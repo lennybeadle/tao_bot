@@ -102,8 +102,6 @@ class MempoolListener:
             # RPC response is typically a dict with 'result' key, or could be the list directly
             pending = response.get("result", [])
             
-            if pending:
-                logger.info(f"📊 Fetched {len(pending)} pending transactions from mempool")
             # Ensure pending is a list before processing
             if not isinstance(pending, list):
                 return {}
@@ -155,10 +153,6 @@ class MempoolListener:
             
             # Extract wallet address for filtering
             hotkey_ss58 = args_dict.get("hotkey_ss58", "")
-            allowed_wallets = config.allowed_wallet_addresses
-            # Only filter if allowed_wallets is configured (non-empty)
-            if allowed_wallets and hotkey_ss58 not in allowed_wallets:
-                return None
             # Process add_stake transaction
             amount = args_dict.get("amount")
             if amount is None:
