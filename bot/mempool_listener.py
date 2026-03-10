@@ -99,7 +99,7 @@ class MempoolListener:
             if call_module != "SubtensorModule":
                 return None
 
-            if call_function != "add_stake":
+            if call_function not in ("add_stake", "add_stake_limit"):
                 return None
 
             args = {
@@ -108,9 +108,6 @@ class MempoolListener:
             }
 
             netuid = int(args.get("netuid", -1))
-
-            if netuid not in config.monitored_subnets:
-                return None
 
             amount = args.get("amount")
 
