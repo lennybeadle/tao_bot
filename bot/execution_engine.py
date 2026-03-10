@@ -89,6 +89,26 @@ class ExecutionEngine:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(self.executor, func, *args, **kwargs)
     
+    async def get_wallet_balance(self) -> Optional[float]:
+        """
+        Get current wallet balance in TAO
+        
+        Returns:
+            Balance in TAO, or None if error
+        """
+        if not self.wallet or not self.subtensor:
+            return None
+        
+        def _get_balance():
+            try:
+                balance_rao = self.subtensor.get_balance(self.wallet.coldkey.ss58_address)
+                return balance_rao / 1e9  # Convert to TAO
+            except Exception as e:
+                logger.error(f"Error getting wallet balance: {e}")
+                return None
+        
+        return await self._execute_in_thread(_get_balance)
+    
     async def _pre_sign_common_transactions(self):
         """Pre-sign common transaction amounts for instant broadcasting"""
         if not self.wallet or not self.subtensor:
@@ -219,39 +239,9 @@ class ExecutionEngine:
             return None
         
         try:
-            # Check wallet balance and ensure minimum reserve is maintained
-            def _get_balance():
-                try:
-                    balance_rao = self.subtensor.get_balance(self.wallet.coldkey.ss58_address)
-                    return balance_rao / 1e9  # Convert to TAO
-                except Exception as e:
-                    logger.error(f"Error getting wallet balance: {e}")
-                    return None
-            
-            balance_tao = await self._execute_in_thread(_get_balance)
-            
-            if balance_tao is None:
-                logger.error("❌ Failed to get wallet balance")
-                return None
-            
-            # Ensure at least min_wallet_reserve TAO remains after staking
-            max_stakeable = balance_tao - config.min_wallet_reserve
-            
-            if max_stakeable <= 0:
-                logger.warning(f"❌ Insufficient balance: {balance_tao:.4f} TAO (need {config.min_wallet_reserve:.4f} TAO reserve)")
-                return None
-            
-            # Adjust amount if it would leave less than reserve
-            if amount > max_stakeable:
-                logger.warning(
-                    f"⚠️ Adjusting stake amount from {amount:.4f} to {max_stakeable:.4f} TAO "
-                    f"to maintain {config.min_wallet_reserve:.4f} TAO reserve "
-                    f"(balance: {balance_tao:.4f} TAO)"
-                )
-                amount = max_stakeable
-            
+            # Validate amount (amount is already calculated in trading_bot with reserve check)
             if amount <= 0:
-                logger.warning(f"❌ Adjusted stake amount is zero or negative")
+                logger.warning(f"❌ Invalid stake amount: {amount:.4f} TAO")
                 return None
             
             broadcast_start = time.time()

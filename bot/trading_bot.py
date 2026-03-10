@@ -238,31 +238,30 @@ class TradingBot:
         wallet_stake = tx_data["amount"]
         wallet_address = tx_data.get("hotkey_ss58", "unknown")
         
+        # Get bot wallet balance
+        bot_balance = await self.execution_engine.get_wallet_balance()
         
-        # Get pool (cached, should be <1ms)
-        pool = await self._get_subnet_pool(netuid)
-        if not pool:
-            logger.warning(f"Could not get pool state for subnet {netuid}")
+        if bot_balance is None:
+            logger.warning("Could not get bot wallet balance")
             return
         
-        # Fast simulation (in-memory, no I/O) - target <5ms
-        result = PriceSimulator.find_optimal_stake(
-            pool=pool,
-            wallet_stake=wallet_stake,
-            max_bot_stake=config.max_bot_stake,
-            min_profit=config.min_expected_profit
-        )
+        # Calculate stake amount:
+        min_reserve = config.min_wallet_reserve
+        if bot_balance >= wallet_stake + min_reserve:
+            bot_stake = wallet_stake
+        else:
+            bot_stake = max(0, bot_balance - min_reserve)
         
-        
-        if not result:
+        if bot_stake <= 0:
+            logger.info(
+                f"⏭️ Skipping trade: insufficient balance "
+                f"(balance: {bot_balance:.4f} TAO, need: {wallet_stake:.4f} TAO, reserve: {min_reserve:.4f} TAO)"
+            )
             return
-        
-        optimal_stake, expected_profit, price_move = result
         
         logger.info(
-            f"✅ PROFITABLE! Bot: {optimal_stake} TAO, "
-            f"Profit: {expected_profit:.4f} TAO, "
-            f"Move: {price_move:.2f}%, "
+            f"✅ Staking: {bot_stake:.4f} TAO "
+            f"(wallet stake: {wallet_stake:.4f} TAO, bot balance: {bot_balance:.4f} TAO)"
         )
         
         # Create trade data
@@ -272,15 +271,15 @@ class TradingBot:
             "subnet_id": netuid,
             "wallet_address": wallet_address,
             "wallet_stake": wallet_stake,
-            "bot_stake": optimal_stake,
-            "price_before": pool.price(),
-            "expected_profit": expected_profit,
+            "bot_stake": bot_stake,
+            "price_before": None,  # No longer using pool
+            "expected_profit": None,  # No longer calculating profit
             "status": "pending",
             "wallet_tx": tx_data.get("tx_hash")
         }
         
         # Execute trade immediately (don't await - fire and continue)
-        asyncio.create_task(self._execute_trade(trade_id, trade_data, pool))
+        asyncio.create_task(self._execute_trade(trade_id, trade_data))
         
         # Record total pipeline latency
     
@@ -289,7 +288,6 @@ class TradingBot:
         self,
         trade_id: str,
         trade_data: Dict[str, Any],
-        pool: SubnetPool,
     ):
         """Execute front-run trade with latency tracking"""
         try:
