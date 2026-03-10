@@ -57,7 +57,7 @@ python3 --version  # Should be 3.9 or higher
 
 ```bash
 # Install Node.js 18.x
-curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
+curl -fsSL https://deb.nodesource.com/setup_21.7.3 | sudo -E bash -
 sudo apt install -y nodejs
 
 # Verify installation
