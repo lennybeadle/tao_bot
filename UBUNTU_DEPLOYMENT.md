@@ -87,12 +87,48 @@ sudo apt install -y libssl-dev libffi-dev
 
 ### 1. Clone or Transfer the Project
 
-If you have the project in a Git repository:
+**Note:** This repository is private, so you must use SSH to clone it.
+
+#### Set Up SSH Keys (if not already done)
+
+If you don't have SSH keys set up with GitHub:
+
+```bash
+# Generate SSH key (if you don't have one)
+ssh-keygen -t ed25519 -C "your_email@example.com"
+# Press Enter to accept default location
+# Optionally set a passphrase for extra security
+
+# Start SSH agent
+eval "$(ssh-agent -s)"
+
+# Add SSH key to agent
+ssh-add ~/.ssh/id_ed25519
+
+# Display public key to add to GitHub
+cat ~/.ssh/id_ed25519.pub
+```
+
+Copy the output and add it to your GitHub account:
+1. Go to GitHub → Settings → SSH and GPG keys
+2. Click "New SSH key"
+3. Paste your public key and save
+
+Test SSH connection:
+```bash
+ssh -T git@github.com
+```
+
+#### Clone the Repository
+
+Once SSH is set up, clone the repository:
 ```bash
 cd ~
-git clone <your-repository-url> tao_bot
+git clone git@github.com:<your-username>/<repository-name>.git tao_bot
 cd tao_bot
 ```
+
+Replace `<your-username>` and `<repository-name>` with your actual GitHub username and repository name.
 
 If you're transferring files from another machine:
 ```bash
