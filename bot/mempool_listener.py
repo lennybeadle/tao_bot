@@ -65,18 +65,8 @@ class MempoolListener:
                 substrate.rpc_request,
                 "author_pendingExtrinsics",
                 []
-            )
-
-            if isinstance(response, dict):
-                pending = response.get("result", [])
-            elif isinstance(response, list):
-                pending = response
-            else:
-                pending = []
-
-            if not isinstance(pending, list):
-                return []
-
+            )          
+            pending = response.get("result", [])
             return pending
 
         except Exception as e:
@@ -109,7 +99,7 @@ class MempoolListener:
 
             netuid = int(args.get("netuid", -1))
 
-            amount = args.get("amount")
+            amount = args.get("amount_staked")
 
             if amount is None:
                 return None
