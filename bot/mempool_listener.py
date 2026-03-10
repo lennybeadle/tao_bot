@@ -113,7 +113,7 @@ class MempoolListener:
                 "type": "stake",
                 "netuid": netuid,
                 "amount": amount,
-                "hotkey_ss58": args.get("hotkey_ss58"),
+                "hotkey_ss58": args.get("hotkey"),
                 "timestamp": time.time()
             }
 
