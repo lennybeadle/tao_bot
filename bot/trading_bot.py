@@ -238,10 +238,6 @@ class TradingBot:
         wallet_stake = tx_data["amount"]
         wallet_address = tx_data.get("hotkey_ss58", "unknown")
         
-        # Note: allowed_wallet_addresses and min_wallet_stake filtering
-        # is already done in _decode_transaction_fast() in mempool_listener.py
-        
-        
         
         # Get pool (cached, should be <1ms)
         pool = await self._get_subnet_pool(netuid)
