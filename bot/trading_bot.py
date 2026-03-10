@@ -236,19 +236,7 @@ class TradingBot:
         import time
         pipeline_start = time.time()
         detect_time = tx_data.get("timestamp", pipeline_start)
-        
-        if tx_data.get("type") != "stake":
-            return
-        
-        # Reset daily counter if needed
-        if datetime.now().date() > self.last_reset:
-            self.daily_trades = 0
-            self.last_reset = datetime.now().date()
-        
-        # Check daily limit (fast check, no I/O)
-        if self.daily_trades >= config.max_daily_trades:
-            return
-        
+        logger.info(f"---bot---")
         netuid = tx_data["netuid"]
         wallet_stake = tx_data["amount"]
         wallet_address = tx_data.get("hotkey_ss58", "unknown")
@@ -275,7 +263,6 @@ class TradingBot:
         )
         
         decision_time = time.time() - decision_start
-        self._record_latency("detect_to_decision", decision_time * 1000)
         
         if not result:
             return
@@ -300,9 +287,7 @@ class TradingBot:
             "price_before": pool.price(),
             "expected_profit": expected_profit,
             "status": "pending",
-            "wallet_tx": tx_data.get("tx_hash"),
-            "detect_timestamp": detect_time,
-            "decision_timestamp": decision_start
+            "wallet_tx": tx_data.get("tx_hash")
         }
         
         # Execute trade immediately (don't await - fire and continue)
@@ -310,26 +295,7 @@ class TradingBot:
         asyncio.create_task(self._execute_trade(trade_id, trade_data, pool, execute_start))
         
         # Record total pipeline latency
-        total_time = time.time() - pipeline_start
-        self._record_latency("total_pipeline", total_time * 1000)
     
-    def _record_latency(self, metric: str, latency_ms: float):
-        """Record latency metric"""
-        if metric in self.latency_metrics:
-            self.latency_metrics[metric].append(latency_ms)
-            # Keep only last 100 measurements
-            if len(self.latency_metrics[metric]) > 100:
-                self.latency_metrics[metric] = self.latency_metrics[metric][-100:]
-            
-            # Log statistics periodically
-            if len(self.latency_metrics[metric]) % 10 == 0:
-                metrics = self.latency_metrics[metric]
-                avg = sum(metrics) / len(metrics)
-                min_lat = min(metrics)
-                max_lat = max(metrics)
-                logger.info(
-                    f"📊 {metric}: avg={avg:.1f}ms, min={min_lat:.1f}ms, max={max_lat:.1f}ms"
-                )
     
     async def _execute_trade(
         self,

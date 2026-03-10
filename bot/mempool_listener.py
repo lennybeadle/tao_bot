@@ -118,7 +118,7 @@ class MempoolListener:
             }
 
         except Exception as e:
-            logger.info(f"Decode error: {e}")
+            logger.error(f"Decode error: {e}")
             return None
 
     async def _safe_callback(self, callback, data):
