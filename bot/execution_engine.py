@@ -53,11 +53,23 @@ class ExecutionEngine:
             # Use thread pool for blocking operations
             loop = asyncio.get_event_loop()
             
-            # Initialize primary subtensor
-            self.subtensor = await loop.run_in_executor(
-                self.executor,
-                lambda: bt.Subtensor(network="finney")
-            )
+            # Initialize primary subtensor with timeout to prevent hanging
+            logger.info("Connecting to Bittensor network for execution engine...")
+            try:
+                self.subtensor = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        self.executor,
+                        lambda: bt.Subtensor(network="finney")
+                    ),
+                    timeout=30.0  # 30 second timeout
+                )
+                logger.info("Execution engine connected to Bittensor network")
+            except asyncio.TimeoutError:
+                logger.error("Timeout connecting to Bittensor network for execution engine.")
+                raise
+            except Exception as e:
+                logger.error(f"Failed to initialize subtensor for execution engine: {e}")
+                raise
             
             # Initialize multiple nodes for broadcasting
             # Note: Subtensor doesn't support 'endpoint' parameter

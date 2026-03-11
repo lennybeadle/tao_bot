@@ -49,11 +49,24 @@ class TradingBot:
         self.subtensor_lock = asyncio.Lock()
         
         # Initialize subtensor connection (separate from mempool listener)
+        # Add timeout to prevent hanging on network issues
         loop = asyncio.get_event_loop()
-        self.subtensor = await loop.run_in_executor(
-            None,
-            lambda: bt.Subtensor(network="finney")
-        )
+        try:
+            logger.info("Connecting to Bittensor network (this may take a moment)...")
+            self.subtensor = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: bt.Subtensor(network="finney")
+                ),
+                timeout=30.0  # 30 second timeout
+            )
+            logger.info("Successfully connected to Bittensor network")
+        except asyncio.TimeoutError:
+            logger.error("Timeout connecting to Bittensor network. Check your internet connection and RPC endpoints.")
+            raise
+        except Exception as e:
+            logger.error(f"Failed to initialize subtensor: {e}")
+            raise
         
         # Initialize execution engine
         await self.execution_engine.initialize()
