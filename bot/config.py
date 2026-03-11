@@ -32,9 +32,10 @@ class BotConfig(BaseModel):
     # Wallet settings
     wallet_name: Optional[str] = os.getenv("WALLET_NAME")
     wallet_hotkey: Optional[str] = os.getenv("WALLET_HOTKEY")
+    wallet_password: Optional[str] = os.getenv("WALLET_PASSWORD")
     
     # Trading parameters
-    min_wallet_stake: float = float(os.getenv("MIN_WALLET_STAKE", "30.0"))  # Minimum TAO to trigger
+    min_wallet_stake: float = float(os.getenv("MIN_WALLET_STAKE", "0.001"))  # Minimum TAO to trigger
     max_bot_stake: float = float(os.getenv("MAX_BOT_STAKE", "100.0"))  # Maximum bot stake per trade
     min_expected_profit: float = float(os.getenv("MIN_EXPECTED_PROFIT", "0.05"))  # Minimum profit in TAO
     bot_stake_ratio: float = float(os.getenv("BOT_STAKE_RATIO", "0.5"))  # Bot stake as ratio of wallet stake

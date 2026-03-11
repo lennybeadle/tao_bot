@@ -25,6 +25,10 @@ class ExecutionEngine:
         self.active_trades: Dict[str, Dict[str, Any]] = {}
         self.executor = ThreadPoolExecutor(max_workers=4)  # Parallel execution
         
+        # Cached wallet keys for performance (avoid repeated decryption)
+        self._cached_hotkey: Optional[bt.Keypair] = None
+        self._cached_coldkey: Optional[bt.Keypair] = None
+        
         # Pre-signed transaction cache for instant broadcasting
         # Format: (netuid, amount) -> (signed_tx_bytes, timestamp)
         # Note: Nonces are embedded in signed transactions, so cache has short TTL
@@ -75,6 +79,9 @@ class ExecutionEngine:
                 )
                 logger.info(f"Wallet initialized: {config.wallet_name}")
                 
+                # Pre-load and cache wallet keys for faster access
+                await self._load_wallet_keys()
+                
                 # Start background pre-signing task
                 asyncio.create_task(self._pre_sign_common_transactions())
             else:
@@ -89,6 +96,47 @@ class ExecutionEngine:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(self.executor, func, *args, **kwargs)
     
+    async def _load_wallet_keys(self):
+        """Pre-load and cache wallet keys for faster access"""
+        if not self.wallet:
+            return
+        
+        def _load():
+            try:
+                self._cached_hotkey = self.wallet.get_hotkey(password=config.wallet_password)
+                self._cached_coldkey = self.wallet.get_coldkey(password=config.wallet_password)
+                
+                if not self._cached_hotkey or not self._cached_coldkey:
+                    raise ValueError("Failed to load wallet keys")
+                
+                logger.info(f"Wallet keys cached - Coldkey: {self._cached_coldkey.ss58_address[:10]}..., Hotkey: {self._cached_hotkey.ss58_address[:10]}...")
+                return True
+            except Exception as e:
+                logger.error(f"Error loading wallet keys: {e}")
+                raise
+        
+        await self._execute_in_thread(_load)
+    
+    def _get_cached_hotkey(self) -> Optional[bt.Keypair]:
+        """Get cached hotkey, load if not cached"""
+        if self._cached_hotkey is None and self.wallet:
+            try:
+                self._cached_hotkey = self.wallet.get_hotkey(password=config.wallet_password)
+            except Exception as e:
+                logger.error(f"Error getting cached hotkey: {e}")
+                return None
+        return self._cached_hotkey
+    
+    def _get_cached_coldkey(self) -> Optional[bt.Keypair]:
+        """Get cached coldkey, load if not cached"""
+        if self._cached_coldkey is None and self.wallet:
+            try:
+                self._cached_coldkey = self.wallet.get_coldkey(password=config.wallet_password)
+            except Exception as e:
+                logger.error(f"Error getting cached coldkey: {e}")
+                return None
+        return self._cached_coldkey
+    
     async def get_wallet_balance(self) -> Optional[float]:
         """
         Get current wallet balance in TAO
@@ -101,7 +149,13 @@ class ExecutionEngine:
         
         def _get_balance():
             try:
-                balance_rao = self.subtensor.get_balance(self.wallet.coldkey.ss58_address)
+                # Use cached coldkey for faster access
+                coldkey = self._get_cached_coldkey()
+                if not coldkey:
+                    logger.error("Failed to get coldkey for balance check")
+                    return None
+                
+                balance_rao = self.subtensor.get_balance(coldkey.ss58_address)
                 return balance_rao / 1e9  # Convert to TAO
             except Exception as e:
                 logger.error(f"Error getting wallet balance: {e}")
@@ -159,13 +213,21 @@ class ExecutionEngine:
     def _create_signed_stake_tx(self, netuid: int, amount: float) -> Optional[bytes]:
         """Create and sign a stake transaction (blocking) - uses current nonce"""
         try:
+            # Use cached keys for faster access
+            hotkey = self._get_cached_hotkey()
+            coldkey = self._get_cached_coldkey()
+            
+            if not hotkey or not coldkey:
+                logger.error("Failed to get wallet keys for transaction signing")
+                return None
+            
             amount_rao = int(amount * 1e9)
             call = self.subtensor.substrate.compose_call(
                 call_module="SubtensorModule",
                 call_function="add_stake",
                 call_params={
                     "netuid": netuid,
-                    "hotkey_ss58": self.wallet.hotkey.ss58_address,
+                    "hotkey_ss58": hotkey.ss58_address,
                     "amount": amount_rao
                 }
             )
@@ -174,14 +236,14 @@ class ExecutionEngine:
             account_info = self.subtensor.substrate.query(
                 module="System",
                 storage_function="Account",
-                params=[self.wallet.coldkey.ss58_address]
+                params=[coldkey.ss58_address]
             )
             
             nonce = account_info.value.get("nonce", 0) if account_info else 0
             
             extrinsic = self.subtensor.substrate.create_signed_extrinsic(
                 call=call,
-                keypair=self.wallet.coldkey,
+                keypair=coldkey,
                 nonce=nonce
             )
             
@@ -285,20 +347,28 @@ class ExecutionEngine:
             
             def _stake():
                 try:
+                    # Use cached keys for faster access
+                    hotkey = self._get_cached_hotkey()
+                    coldkey = self._get_cached_coldkey()
+                    
+                    if not hotkey or not coldkey:
+                        logger.error("Failed to get wallet keys for staking")
+                        return None
+                    
                     # Create signed transaction
                     call = self.subtensor.substrate.compose_call(
                         call_module="SubtensorModule",
                         call_function="add_stake",
                         call_params={
                             "netuid": netuid,
-                            "hotkey_ss58": self.wallet.hotkey.ss58_address,
+                            "hotkey_ss58": hotkey.ss58_address,
                             "amount": amount_rao
                         }
                     )
                     
                     extrinsic = self.subtensor.substrate.create_signed_extrinsic(
                         call=call,
-                        keypair=self.wallet.coldkey
+                        keypair=coldkey
                     )
                     
                     return extrinsic.encode()
@@ -371,20 +441,28 @@ class ExecutionEngine:
             
             def _unstake():
                 try:
+                    # Use cached keys for faster access
+                    hotkey = self._get_cached_hotkey()
+                    coldkey = self._get_cached_coldkey()
+                    
+                    if not hotkey or not coldkey:
+                        logger.error("Failed to get wallet keys for unstaking")
+                        return None
+                    
                     # Create signed transaction
                     call = self.subtensor.substrate.compose_call(
                         call_module="SubtensorModule",
                         call_function="remove_stake",
                         call_params={
                             "netuid": netuid,
-                            "hotkey_ss58": self.wallet.hotkey.ss58_address,
+                            "hotkey_ss58": hotkey.ss58_address,
                             "amount": amount_rao
                         }
                     )
                     
                     extrinsic = self.subtensor.substrate.create_signed_extrinsic(
                         call=call,
-                        keypair=self.wallet.coldkey
+                        keypair=coldkey
                     )
                     
                     return extrinsic.encode()
