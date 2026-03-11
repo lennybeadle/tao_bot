@@ -56,7 +56,7 @@ class TradingBot:
             self.subtensor = await asyncio.wait_for(
                 loop.run_in_executor(
                     None,
-                    lambda: bt.Subtensor(network="finney", chain_endpoint="ws://127.0.0.1:9944")
+                    lambda: bt.Subtensor(network="finney")
                 ),
                 timeout=30.0  # 30 second timeout
             )

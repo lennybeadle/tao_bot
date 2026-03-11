@@ -65,7 +65,7 @@ class ExecutionEngine:
                 self.subtensor = await asyncio.wait_for(
                     loop.run_in_executor(
                         self.executor,
-                        lambda: bt.Subtensor(network="finney", chain_endpoint="ws://127.0.0.1:9944")
+                        lambda: bt.Subtensor(network="finney")
                     ),
                     timeout=30.0  # 30 second timeout
                 )
@@ -109,9 +109,6 @@ class ExecutionEngine:
                 
                 # Start background pre-signing task
                 asyncio.create_task(self._pre_sign_common_transactions())
-                
-                # Start background balance updater
-                asyncio.create_task(self._background_balance_updater())
             else:
                 logger.warning("Wallet not configured - execution disabled")
                 
@@ -168,40 +165,17 @@ class ExecutionEngine:
     async def get_wallet_balance(self) -> Optional[float]:
         """
         Get current wallet balance in TAO - ULTRA-FAST with in-memory cache
+        Always uses cached balance when available (never blocks)
         
         Returns:
-            Balance in TAO, or None if error
+            Balance in TAO, or None if error or no cache available
         """
         if not self.wallet or not self.subtensor:
             return None
         
-        # Return cached balance immediately if available and fresh (< 5 seconds old)
-        current_time = time.time()
-        if self._cached_balance is not None and (current_time - self._balance_cache_time) < self._balance_cache_ttl:
-            return self._cached_balance
-        
-        # Cache miss or stale - trigger background update but return cached value if available
-        # This ensures we never block the hot path
-        if self._cached_balance is not None:
-            # Return stale cache rather than blocking
-            logger.debug(f"Using stale balance cache: {self._cached_balance:.4f} TAO")
-            # Trigger background refresh
-            asyncio.create_task(self._update_balance_cache())
-            return self._cached_balance
-        
-        # No cache at all - must fetch (but with timeout to prevent hanging)
-        try:
-            balance = await asyncio.wait_for(
-                self._fetch_balance_with_timeout(),
-                timeout=2.0  # 2 second timeout to prevent 140s hangs
-            )
-            if balance is not None:
-                self._cached_balance = balance
-                self._balance_cache_time = time.time()
-            return balance
-        except asyncio.TimeoutError:
-            logger.warning("Balance fetch timed out after 2s - using None")
-            return None
+        # Always use cached balance if available (fresh or stale)
+        return self._cached_balance
+            
     
     async def _fetch_balance_with_timeout(self) -> Optional[float]:
         """Fetch balance with timeout protection"""
@@ -247,16 +221,6 @@ class ExecutionEngine:
             logger.debug("Balance cache update timed out (non-critical)")
         except Exception as e:
             logger.debug(f"Balance cache update error: {e}")
-    
-    async def _background_balance_updater(self):
-        """Background task to continuously update balance cache"""
-        while True:
-            try:
-                await self._update_balance_cache()
-                await asyncio.sleep(self._balance_update_interval)
-            except Exception as e:
-                logger.debug(f"Background balance updater error: {e}")
-                await asyncio.sleep(5)
     
     async def _pre_sign_common_transactions(self):
         """Pre-sign common transaction amounts for instant broadcasting"""
@@ -589,6 +553,9 @@ class ExecutionEngine:
                 if trade_id and trade_id in self.active_trades:
                     self.active_trades[trade_id]["unstake_tx"] = tx_hash
                     self.active_trades[trade_id]["status"] = "completed"
+                
+                # Update balance cache after successful unstake (non-blocking)
+                asyncio.create_task(self._update_balance_cache())
                 
                 return tx_hash
             else:
