@@ -5,6 +5,7 @@ Ultra-optimized for minimal latency with pre-signed transactions and multi-node 
 import asyncio
 import logging
 import time
+import threading
 from typing import Optional, Dict, Any, List
 from concurrent.futures import ThreadPoolExecutor
 import bittensor as bt
@@ -24,6 +25,9 @@ class ExecutionEngine:
         self.wallet: Optional[bt.Wallet] = None
         self.active_trades: Dict[str, Dict[str, Any]] = {}
         self.executor = ThreadPoolExecutor(max_workers=4)  # Parallel execution
+        
+        # Thread lock for subtensor operations (substrate connection is not thread-safe)
+        self._subtensor_lock = threading.Lock()
         
         # Cached wallet keys for performance (avoid repeated decryption)
         self._cached_hotkey: Optional[bt.Keypair] = None
@@ -155,7 +159,15 @@ class ExecutionEngine:
                     logger.error("Failed to get coldkey for balance check")
                     return None
                 
-                balance_rao = self.subtensor.get_balance(coldkey.ss58_address)
+                # Serialize access to subtensor (not thread-safe)
+                with self._subtensor_lock:
+                    balance_rao = self.subtensor.get_balance(coldkey.ss58_address)
+                
+                if hasattr(balance_rao, 'value'):
+                    balance_rao = float(balance_rao.value)
+                else:
+                    balance_rao = float(balance_rao)
+                
                 return balance_rao / 1e9  # Convert to TAO
             except Exception as e:
                 logger.error(f"Error getting wallet balance: {e}")
@@ -222,30 +234,33 @@ class ExecutionEngine:
                 return None
             
             amount_rao = int(amount * 1e9)
-            call = self.subtensor.substrate.compose_call(
-                call_module="SubtensorModule",
-                call_function="add_stake",
-                call_params={
-                    "netuid": netuid,
-                    "hotkey_ss58": hotkey.ss58_address,
-                    "amount": amount_rao
-                }
-            )
             
-            # Get current account info for nonce
-            account_info = self.subtensor.substrate.query(
-                module="System",
-                storage_function="Account",
-                params=[coldkey.ss58_address]
-            )
-            
-            nonce = account_info.value.get("nonce", 0) if account_info else 0
-            
-            extrinsic = self.subtensor.substrate.create_signed_extrinsic(
-                call=call,
-                keypair=coldkey,
-                nonce=nonce
-            )
+            # Serialize access to subtensor (not thread-safe)
+            with self._subtensor_lock:
+                call = self.subtensor.substrate.compose_call(
+                    call_module="SubtensorModule",
+                    call_function="add_stake",
+                    call_params={
+                        "netuid": netuid,
+                        "hotkey_ss58": hotkey.ss58_address,
+                        "amount": amount_rao
+                    }
+                )
+                
+                # Get current account info for nonce
+                account_info = self.subtensor.substrate.query(
+                    module="System",
+                    storage_function="Account",
+                    params=[coldkey.ss58_address]
+                )
+                
+                nonce = account_info.value.get("nonce", 0) if account_info else 0
+                
+                extrinsic = self.subtensor.substrate.create_signed_extrinsic(
+                    call=call,
+                    keypair=coldkey,
+                    nonce=nonce
+                )
             
             return extrinsic.encode()
         except Exception as e:
@@ -261,13 +276,14 @@ class ExecutionEngine:
             """Broadcast to a single node"""
             try:
                 loop = asyncio.get_event_loop()
-                result = await loop.run_in_executor(
-                    self.executor,
-                    lambda: node.substrate.submit_extrinsic(
-                        extrinsic=tx_bytes,
-                        wait_for_inclusion=False
-                    )
-                )
+                def _submit():
+                    # Serialize access to subtensor (not thread-safe)
+                    with self._subtensor_lock:
+                        return node.substrate.submit_extrinsic(
+                            extrinsic=tx_bytes,
+                            wait_for_inclusion=False
+                        )
+                result = await loop.run_in_executor(self.executor, _submit)
                 return result if isinstance(result, str) else getattr(result, "tx_hash", None)
             except Exception as e:
                 logger.debug(f"Broadcast error: {e}")
@@ -355,21 +371,23 @@ class ExecutionEngine:
                         logger.error("Failed to get wallet keys for staking")
                         return None
                     
-                    # Create signed transaction
-                    call = self.subtensor.substrate.compose_call(
-                        call_module="SubtensorModule",
-                        call_function="add_stake",
-                        call_params={
-                            "netuid": netuid,
-                            "hotkey_ss58": hotkey.ss58_address,
-                            "amount": amount_rao
-                        }
-                    )
-                    
-                    extrinsic = self.subtensor.substrate.create_signed_extrinsic(
-                        call=call,
-                        keypair=coldkey
-                    )
+                    # Serialize access to subtensor (not thread-safe)
+                    with self._subtensor_lock:
+                        # Create signed transaction
+                        call = self.subtensor.substrate.compose_call(
+                            call_module="SubtensorModule",
+                            call_function="add_stake",
+                            call_params={
+                                "netuid": netuid,
+                                "hotkey_ss58": hotkey.ss58_address,
+                                "amount": amount_rao
+                            }
+                        )
+                        
+                        extrinsic = self.subtensor.substrate.create_signed_extrinsic(
+                            call=call,
+                            keypair=coldkey
+                        )
                     
                     return extrinsic.encode()
                 except Exception as e:
@@ -449,21 +467,23 @@ class ExecutionEngine:
                         logger.error("Failed to get wallet keys for unstaking")
                         return None
                     
-                    # Create signed transaction
-                    call = self.subtensor.substrate.compose_call(
-                        call_module="SubtensorModule",
-                        call_function="remove_stake",
-                        call_params={
-                            "netuid": netuid,
-                            "hotkey_ss58": hotkey.ss58_address,
-                            "amount": amount_rao
-                        }
-                    )
-                    
-                    extrinsic = self.subtensor.substrate.create_signed_extrinsic(
-                        call=call,
-                        keypair=coldkey
-                    )
+                    # Serialize access to subtensor (not thread-safe)
+                    with self._subtensor_lock:
+                        # Create signed transaction
+                        call = self.subtensor.substrate.compose_call(
+                            call_module="SubtensorModule",
+                            call_function="remove_stake",
+                            call_params={
+                                "netuid": netuid,
+                                "hotkey_ss58": hotkey.ss58_address,
+                                "amount": amount_rao
+                            }
+                        )
+                        
+                        extrinsic = self.subtensor.substrate.create_signed_extrinsic(
+                            call=call,
+                            keypair=coldkey
+                        )
                     
                     return extrinsic.encode()
                 except Exception as e:
