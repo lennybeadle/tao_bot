@@ -277,14 +277,28 @@ class TradingBot:
         # Measure latency from mempool detection to decision point (right before the check)
         latency_start = time.time()
         detection_timestamp = tx_data.get("detection_timestamp")
+        callback_start_timestamp = tx_data.get("callback_start_timestamp")
         detect_to_decision_latency = None
-        if detection_timestamp:
+        
+        # Use callback_start_timestamp if available (more accurate - accounts for queue delay)
+        # Otherwise fall back to detection_timestamp
+        if callback_start_timestamp:
+            current_time = time.time()
+            detect_to_decision_latency = (current_time - callback_start_timestamp) * 1000  # Convert to milliseconds
+            # Also track queue delay separately for debugging
+            if detection_timestamp:
+                queue_delay = (callback_start_timestamp - detection_timestamp) * 1000
+                logger.info(f"⏱️ Queue delay (detection to callback start): {queue_delay:.2f}ms")
+        elif detection_timestamp:
             current_time = time.time()
             detect_to_decision_latency = (current_time - detection_timestamp) * 1000  # Convert to milliseconds
+        
+        if detect_to_decision_latency is not None:
             self.latency_metrics["detect_to_decision"].append(detect_to_decision_latency)
             # Keep only last 100 measurements
             if len(self.latency_metrics["detect_to_decision"]) > 100:
                 self.latency_metrics["detect_to_decision"] = self.latency_metrics["detect_to_decision"][-100:]
+        
         latency_time = (time.time() - latency_start) * 1000
         logger.info(f"⏱️ _handle_stake_detection: latency_tracking: {latency_time:.2f}ms")
         if detect_to_decision_latency is not None:

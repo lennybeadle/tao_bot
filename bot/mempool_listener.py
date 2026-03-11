@@ -142,6 +142,12 @@ class MempoolListener:
 
         callback_start = time.time()
         callback_name = callback.__name__ if hasattr(callback, '__name__') else str(callback)
+        
+        # Update callback_start_timestamp when callback actually starts executing
+        # This accounts for any queue delay between scheduling and execution
+        if "detection_timestamp" in data:
+            data["callback_start_timestamp"] = callback_start
+        
         try:
             await callback(data)
             callback_time = (time.time() - callback_start) * 1000
