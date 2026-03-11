@@ -40,6 +40,12 @@ class ExecutionEngine:
         self.cache_max_age = 30  # Cache valid for 30 seconds
         self.cache_refresh_interval = 10  # Refresh every 10 seconds
         
+        # Cached wallet balance for ultra-fast access (updated in background)
+        self._cached_balance: Optional[float] = None
+        self._balance_cache_time: float = 0
+        self._balance_cache_ttl = 5  # Cache valid for 5 seconds
+        self._balance_update_interval = 2  # Update every 2 seconds in background
+        
         # Latency tracking
         self.latency_stats: Dict[str, List[float]] = {
             "detect_to_decision": [],
@@ -98,8 +104,14 @@ class ExecutionEngine:
                 # Pre-load and cache wallet keys for faster access
                 await self._load_wallet_keys()
                 
+                # Initial balance fetch (non-blocking, will use cache if slow)
+                asyncio.create_task(self._update_balance_cache())
+                
                 # Start background pre-signing task
                 asyncio.create_task(self._pre_sign_common_transactions())
+                
+                # Start background balance updater
+                asyncio.create_task(self._background_balance_updater())
             else:
                 logger.warning("Wallet not configured - execution disabled")
                 
@@ -155,7 +167,7 @@ class ExecutionEngine:
     
     async def get_wallet_balance(self) -> Optional[float]:
         """
-        Get current wallet balance in TAO
+        Get current wallet balance in TAO - ULTRA-FAST with in-memory cache
         
         Returns:
             Balance in TAO, or None if error
@@ -163,6 +175,36 @@ class ExecutionEngine:
         if not self.wallet or not self.subtensor:
             return None
         
+        # Return cached balance immediately if available and fresh (< 5 seconds old)
+        current_time = time.time()
+        if self._cached_balance is not None and (current_time - self._balance_cache_time) < self._balance_cache_ttl:
+            return self._cached_balance
+        
+        # Cache miss or stale - trigger background update but return cached value if available
+        # This ensures we never block the hot path
+        if self._cached_balance is not None:
+            # Return stale cache rather than blocking
+            logger.debug(f"Using stale balance cache: {self._cached_balance:.4f} TAO")
+            # Trigger background refresh
+            asyncio.create_task(self._update_balance_cache())
+            return self._cached_balance
+        
+        # No cache at all - must fetch (but with timeout to prevent hanging)
+        try:
+            balance = await asyncio.wait_for(
+                self._fetch_balance_with_timeout(),
+                timeout=2.0  # 2 second timeout to prevent 140s hangs
+            )
+            if balance is not None:
+                self._cached_balance = balance
+                self._balance_cache_time = time.time()
+            return balance
+        except asyncio.TimeoutError:
+            logger.warning("Balance fetch timed out after 2s - using None")
+            return None
+    
+    async def _fetch_balance_with_timeout(self) -> Optional[float]:
+        """Fetch balance with timeout protection"""
         def _get_balance():
             try:
                 # Use cached coldkey for faster access
@@ -186,6 +228,35 @@ class ExecutionEngine:
                 return None
         
         return await self._execute_in_thread(_get_balance)
+    
+    async def _update_balance_cache(self):
+        """Update balance cache in background (non-blocking)"""
+        if not self.wallet or not self.subtensor:
+            return
+        
+        try:
+            balance = await asyncio.wait_for(
+                self._fetch_balance_with_timeout(),
+                timeout=2.0  # 2 second timeout
+            )
+            if balance is not None:
+                self._cached_balance = balance
+                self._balance_cache_time = time.time()
+                logger.debug(f"Balance cache updated: {balance:.4f} TAO")
+        except asyncio.TimeoutError:
+            logger.debug("Balance cache update timed out (non-critical)")
+        except Exception as e:
+            logger.debug(f"Balance cache update error: {e}")
+    
+    async def _background_balance_updater(self):
+        """Background task to continuously update balance cache"""
+        while True:
+            try:
+                await self._update_balance_cache()
+                await asyncio.sleep(self._balance_update_interval)
+            except Exception as e:
+                logger.debug(f"Background balance updater error: {e}")
+                await asyncio.sleep(5)
     
     async def _pre_sign_common_transactions(self):
         """Pre-sign common transaction amounts for instant broadcasting"""
