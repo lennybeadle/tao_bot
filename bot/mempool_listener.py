@@ -134,8 +134,6 @@ class MempoolListener:
             }
 
         except Exception as e:
-            decode_time = (time.time() - decode_start) * 1000
-            logger.error(f"⏱️ _decode_extrinsic: {decode_time:.2f}ms - Decode error: {e}")
             return None
 
     async def _safe_callback(self, callback, data):
@@ -155,6 +153,61 @@ class MempoolListener:
         except Exception as e:
             callback_time = (time.time() - callback_start) * 1000
             logger.error(f"⏱️ _safe_callback ({callback_name}): {callback_time:.2f}ms - Callback failure: {e}")
+
+    async def _process_extrinsic(self, extrinsic_hex: str, idx: int, total: int, now: float):
+        """Process a single extrinsic concurrently"""
+        
+        extrinsic_start = time.time()
+        tx_hash = str(extrinsic_hex)
+        
+        # Cache check
+        cache_check_start = time.time()
+        if tx_hash in self.tx_cache:
+            if now - self.tx_cache[tx_hash] < 1:
+                cache_check_time = (time.time() - cache_check_start) * 1000
+                logger.debug(f"⏱️ Extrinsic {idx+1}/{total}: cache_check: {cache_check_time:.2f}ms - skipped (recent)")
+                return
+        cache_check_time = (time.time() - cache_check_start) * 1000
+
+        # Capture detection timestamp at the earliest point
+        detection_timestamp = time.time()
+
+        # Decode extrinsic (run in thread pool since it's CPU-bound)
+        decode_start = time.time()
+        decoded = None
+
+        for substrate in self.substrates:
+            # Run decode in thread pool to avoid blocking
+            decoded = await asyncio.to_thread(
+                self._decode_extrinsic,
+                substrate,
+                extrinsic_hex
+            )
+            if decoded:
+                break
+        decode_time = (time.time() - decode_start) * 1000
+
+        if not decoded:
+            extrinsic_time = (time.time() - extrinsic_start) * 1000
+            logger.debug(f"⏱️ Extrinsic {idx+1}/{total}: total: {extrinsic_time:.2f}ms (cache_check: {cache_check_time:.2f}ms, decode: {decode_time:.2f}ms) - filtered")
+            return
+
+        self.tx_cache[tx_hash] = now
+
+        # Add detection timestamp to decoded data for latency tracking
+        if decoded:
+            decoded["detection_timestamp"] = detection_timestamp
+
+        # Execute callbacks
+        callback_start = time.time()
+        for callback in self.callbacks:
+            asyncio.create_task(
+                self._safe_callback(callback, decoded)
+            )
+        callback_time = (time.time() - callback_start) * 1000
+        
+        extrinsic_time = (time.time() - extrinsic_start) * 1000
+        logger.info(f"⏱️ Extrinsic {idx+1}/{total}: total: {extrinsic_time:.2f}ms (cache_check: {cache_check_time:.2f}ms, decode: {decode_time:.2f}ms, callback_setup: {callback_time:.2f}ms) - processed")
 
     async def _process_mempool(self):
 
@@ -177,63 +230,13 @@ class MempoolListener:
         
         logger.debug(f"⏱️ _process_mempool: Processing {len(pending_extrinsics)} pending extrinsics")
 
+        # Process all extrinsics concurrently (fire and forget - no need to wait)
         for idx, extrinsic_hex in enumerate(pending_extrinsics):
-            
-            extrinsic_start = time.time()
-            tx_hash = str(extrinsic_hex)
-            
-            # Cache check
-            cache_check_start = time.time()
-            if tx_hash in self.tx_cache:
-                if now - self.tx_cache[tx_hash] < 1:
-                    cache_check_time = (time.time() - cache_check_start) * 1000
-                    logger.debug(f"⏱️ Extrinsic {idx+1}/{len(pending_extrinsics)}: cache_check: {cache_check_time:.2f}ms - skipped (recent)")
-                    continue
-            cache_check_time = (time.time() - cache_check_start) * 1000
+            asyncio.create_task(
+                self._process_extrinsic(extrinsic_hex, idx, len(pending_extrinsics), now)
+            )
 
-            # Capture detection timestamp at the earliest point
-            detection_timestamp = time.time()
-
-            # Decode extrinsic
-            decode_start = time.time()
-            decoded = None
-
-            for substrate in self.substrates:
-                decoded = self._decode_extrinsic(substrate, extrinsic_hex)
-                if decoded:
-                    break
-            decode_time = (time.time() - decode_start) * 1000
-
-            if not decoded:
-                extrinsic_time = (time.time() - extrinsic_start) * 1000
-                logger.debug(f"⏱️ Extrinsic {idx+1}/{len(pending_extrinsics)}: total: {extrinsic_time:.2f}ms (cache_check: {cache_check_time:.2f}ms, decode: {decode_time:.2f}ms) - filtered")
-                continue
-
-            self.tx_cache[tx_hash] = now
-
-            # Add detection timestamp to decoded data for latency tracking
-            if decoded:
-                decoded["detection_timestamp"] = detection_timestamp
-
-            # Execute callbacks
-            callback_start = time.time()
-            for callback in self.callbacks:
-                asyncio.create_task(
-                    self._safe_callback(callback, decoded)
-                )
-            callback_time = (time.time() - callback_start) * 1000
-            
-            extrinsic_time = (time.time() - extrinsic_start) * 1000
-            logger.info(f"⏱️ Extrinsic {idx+1}/{len(pending_extrinsics)}: total: {extrinsic_time:.2f}ms (cache_check: {cache_check_time:.2f}ms, decode: {decode_time:.2f}ms, callback_setup: {callback_time:.2f}ms) - processed")
-
-        cutoff = now - 60
-        self.tx_cache = {
-            k: v for k, v in self.tx_cache.items()
-            if v > cutoff
-        }
         
-        process_time = (time.time() - process_start) * 1000
-        logger.debug(f"⏱️ _process_mempool: total: {process_time:.2f}ms, processed {len([e for e in pending_extrinsics if str(e) not in self.tx_cache or now - self.tx_cache.get(str(e), 0) >= 1])} extrinsics")
 
     async def start(self):
 
