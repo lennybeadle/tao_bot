@@ -252,10 +252,25 @@ class TradingBot:
         else:
             bot_stake = max(0, bot_balance - min_reserve)
         
+        # Measure latency from mempool detection to decision point (right before the check)
+        detection_timestamp = tx_data.get("detection_timestamp")
+        detect_to_decision_latency = None
+        if detection_timestamp:
+            current_time = time.time()
+            detect_to_decision_latency = (current_time - detection_timestamp) * 1000  # Convert to milliseconds
+            self.latency_metrics["detect_to_decision"].append(detect_to_decision_latency)
+            # Keep only last 100 measurements
+            if len(self.latency_metrics["detect_to_decision"]) > 100:
+                self.latency_metrics["detect_to_decision"] = self.latency_metrics["detect_to_decision"][-100:]
+            logger.debug(f"⏱️ Detection to decision latency: {detect_to_decision_latency:.2f}ms")
+        
         if bot_stake <= 0:
+            latency_info = ""
+            if detect_to_decision_latency is not None:
+                latency_info = f" [latency: {detect_to_decision_latency:.2f}ms]"
             logger.info(
                 f"⏭️ Skipping trade: insufficient balance "
-                f"(balance: {bot_balance:.4f} TAO, need: {wallet_stake:.4f} TAO, reserve: {min_reserve:.4f} TAO)"
+                f"(balance: {bot_balance:.4f} TAO, need: {wallet_stake:.4f} TAO, reserve: {min_reserve:.4f} TAO){latency_info}"
             )
             return
         

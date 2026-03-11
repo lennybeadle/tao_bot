@@ -153,6 +153,9 @@ class MempoolListener:
                 if now - self.tx_cache[tx_hash] < 1:
                     continue
 
+            # Capture detection timestamp at the earliest point
+            detection_timestamp = time.time()
+
             decoded = None
 
             for substrate in self.substrates:
@@ -164,6 +167,10 @@ class MempoolListener:
                 continue
 
             self.tx_cache[tx_hash] = now
+
+            # Add detection timestamp to decoded data for latency tracking
+            if decoded:
+                decoded["detection_timestamp"] = detection_timestamp
 
             for callback in self.callbacks:
                 asyncio.create_task(
