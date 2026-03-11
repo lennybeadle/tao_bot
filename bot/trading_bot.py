@@ -257,11 +257,11 @@ class TradingBot:
         balance_start = time.time()
         bot_balance = await self.execution_engine.get_wallet_balance()
         balance_time = (time.time() - balance_start) * 1000
-        logger.debug(f"⏱️ _handle_stake_detection: get_wallet_balance: {balance_time:.2f}ms")
+        logger.info(f"⏱️ _handle_stake_detection: get_wallet_balance: {balance_time:.2f}ms")
         
         if bot_balance is None:
             handle_time = (time.time() - handle_start) * 1000
-            logger.warning(f"⏱️ _handle_stake_detection: {handle_time:.2f}ms - Could not get bot wallet balance")
+            logger.info(f"⏱️ _handle_stake_detection: {handle_time:.2f}ms - Could not get bot wallet balance")
             return
         
         # Calculate stake amount:
@@ -272,7 +272,7 @@ class TradingBot:
         else:
             bot_stake = max(0, bot_balance - min_reserve)
         calc_time = (time.time() - calc_start) * 1000
-        logger.debug(f"⏱️ _handle_stake_detection: calculate_stake: {calc_time:.2f}ms")
+        logger.info(f"⏱️ _handle_stake_detection: calculate_stake: {calc_time:.2f}ms")
         
         # Measure latency from mempool detection to decision point (right before the check)
         latency_start = time.time()
@@ -286,7 +286,7 @@ class TradingBot:
             if len(self.latency_metrics["detect_to_decision"]) > 100:
                 self.latency_metrics["detect_to_decision"] = self.latency_metrics["detect_to_decision"][-100:]
         latency_time = (time.time() - latency_start) * 1000
-        logger.debug(f"⏱️ _handle_stake_detection: latency_tracking: {latency_time:.2f}ms")
+        logger.info(f"⏱️ _handle_stake_detection: latency_tracking: {latency_time:.2f}ms")
         if detect_to_decision_latency is not None:
             logger.debug(f"⏱️ Detection to decision latency: {detect_to_decision_latency:.2f}ms")
         
@@ -320,13 +320,13 @@ class TradingBot:
             "wallet_tx": tx_data.get("tx_hash")
         }
         trade_data_time = (time.time() - trade_data_start) * 1000
-        logger.debug(f"⏱️ _handle_stake_detection: create_trade_data: {trade_data_time:.2f}ms")
+        logger.info(f"⏱️ _handle_stake_detection: create_trade_data: {trade_data_time:.2f}ms")
         
         # Execute trade immediately (don't await - fire and continue)
         execute_start = time.time()
         asyncio.create_task(self._execute_trade(trade_id, trade_data))
         execute_time = (time.time() - execute_start) * 1000
-        logger.debug(f"⏱️ _handle_stake_detection: create_task: {execute_time:.2f}ms")
+        logger.info(f"⏱️ _handle_stake_detection: create_task: {execute_time:.2f}ms")
         
         handle_time = (time.time() - handle_start) * 1000
         logger.info(f"⏱️ _handle_stake_detection: total: {handle_time:.2f}ms (balance: {balance_time:.2f}ms, calc: {calc_time:.2f}ms, latency: {latency_time:.2f}ms, trade_data: {trade_data_time:.2f}ms, execute: {execute_time:.2f}ms)")
