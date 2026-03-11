@@ -78,11 +78,11 @@ class TradingBot:
         from bot.database import init_db
         await init_db()
         
-        # Start background liquidity updater
-        asyncio.create_task(self._background_liquidity_updater())
+        # # Start background liquidity updater
+        # asyncio.create_task(self._background_liquidity_updater())
         
-        # Start background config reloader to pick up monitored_subnets changes
-        asyncio.create_task(self._background_config_reloader())
+        # # Start background config reloader to pick up monitored_subnets changes
+        # asyncio.create_task(self._background_config_reloader())
         
         logger.info("Trading bot initialized")
     
@@ -129,7 +129,7 @@ class TradingBot:
         while self.running:
             try:
                 # Reload monitored_subnets and allowed wallets from database every 30 seconds
-                await config.reload_monitored_subnets()
+                # await config.reload_monitored_subnets()
                 await config.reload_allowed_wallet_addresses()
                 logger.debug(f"Reloaded monitored subnets: {config.monitored_subnets}")
                 logger.debug(f"Reloaded allowed wallets: {len(config.allowed_wallet_addresses)} addresses")
