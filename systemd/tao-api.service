@@ -1,0 +1,25 @@
+[Unit]
+Description=TAO Staking Bot API Server
+After=network.target
+
+[Service]
+Type=simple
+User=tao_bot
+Group=tao_bot
+WorkingDirectory=/opt/tao_bot
+Environment="RUST_LOG=info"
+ExecStart=/opt/tao_bot/target/release/start_api
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+
+# Resource limits (optional)
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
