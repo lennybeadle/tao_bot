@@ -21,13 +21,8 @@ tokio = { version = "1.35", features = ["full"] }
 tokio-stream = "0.1"
 
 # Substrate/Bittensor
-subxt = { version = "0.34", features = ["jsonrpsee", "runtime-metadata", "substrate-compat"] }
-sp-core = "33.0"
-sp-runtime = "33.0"
-scale-codec = "3.0"
-scale-decode = "3.0"
-scale-encode = "3.0"
-substrate-subxt = "0.34"
+subxt = { version = "0.34", features = ["jsonrpsee", "substrate-compat", "sp-core", "sp-runtime"] }
+parity-scale-codec = { version = "3.0", features = ["derive"] }
 
 # Web framework
 axum = "0.7"
@@ -37,7 +32,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Database
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid"] }
+sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "sqlite", "chrono"] }
 chrono = { version = "0.4", features = ["serde"] }
 
 # Serialization
@@ -49,8 +44,6 @@ dotenv = "0.15"
 config = "0.14"
 
 # Crypto
-sp-crypto = "12.0"
-substrate-bip39 = "0.4"
 hex = "0.4"
 bs58 = "0.5"
 
