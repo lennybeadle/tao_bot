@@ -269,7 +269,7 @@ class TradingBot:
         if bot_stake <= 0:
             logger.info(
                 f"⏭️ Skipping trade: insufficient balance "
-                f"(balance: {bot_balance:.4f} TAO, need: {wallet_stake:.4f} TAO, reserve: {min_reserve:.4f} TAO)"
+                f"(balance: {bot_balance:.4f} TAO,netuid: {netuid}  need: {wallet_stake:.4f} TAO, reserve: {min_reserve:.4f} TAO)"
             )
             return
         
