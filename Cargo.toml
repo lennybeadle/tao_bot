@@ -1,0 +1,76 @@
+[package]
+name = "tao_bot"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "start_bot"
+path = "src/bin/start_bot.rs"
+
+[[bin]]
+name = "start_api"
+path = "src/bin/start_api.rs"
+
+[[bin]]
+name = "init_db"
+path = "src/bin/init_db.rs"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+tokio-stream = "0.1"
+
+# Substrate/Bittensor
+subxt = { version = "0.34", features = ["jsonrpsee", "runtime-metadata", "substrate-compat"] }
+sp-core = "33.0"
+sp-runtime = "33.0"
+scale-codec = "3.0"
+scale-decode = "3.0"
+scale-encode = "3.0"
+substrate-subxt = "0.34"
+
+# Web framework
+axum = "0.7"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Database
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Configuration
+dotenv = "0.15"
+config = "0.14"
+
+# Crypto
+sp-crypto = "12.0"
+substrate-bip39 = "0.4"
+hex = "0.4"
+bs58 = "0.5"
+
+# Utilities
+anyhow = "1.0"
+thiserror = "1.0"
+once_cell = "1.19"
+dashmap = "5.5"
+parking_lot = "0.12"
+futures = "0.3"
+
+# Logging
+env_logger = "0.11"
+log = "0.4"
+
+# HTTP client
+reqwest = { version = "0.11", features = ["json"] }
+
+# WebSocket
+tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
+
+[dev-dependencies]
+tokio-test = "0.4"
