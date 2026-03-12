@@ -107,7 +107,7 @@ class MempoolListener:
 
             if amount < config.min_wallet_stake:
                 return None
-            
+            logger.info(f"netuid: {netuid} amount: {amount}")
             return {
                 "type": "stake",
                 "netuid": netuid,
