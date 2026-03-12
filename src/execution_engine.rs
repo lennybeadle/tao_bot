@@ -3,11 +3,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::Duration;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 use subxt::OnlineClient;
 use subxt::config::PolkadotConfig;
 use crate::config;
-use crate::models::Trade;
 
 pub struct ExecutionEngine {
     subtensor: Arc<RwLock<Option<OnlineClient<PolkadotConfig>>>>,
@@ -122,7 +121,7 @@ impl ExecutionEngine {
                     TradeState {
                         netuid,
                         amount,
-                        stake_tx: hash.clone(),
+                        stake_tx: Some(hash.clone()),
                         status: "staked".to_string(),
                         timestamp: std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
@@ -189,21 +188,6 @@ impl ExecutionEngine {
         Ok(None)
     }
 
-    pub async fn record_trade_async(&self, trade_data: Trade) {
-        // Fire and forget - don't wait for DB write
-        let engine = self.clone();
-        tokio::spawn(async move {
-            if let Err(e) = engine.record_trade(trade_data).await {
-                error!("Error recording trade: {}", e);
-            }
-        });
-    }
-
-    async fn record_trade(&self, trade_data: Trade) -> Result<()> {
-        // Record trade in database
-        // This would use sqlx to insert the trade
-        Ok(())
-    }
 }
 
 impl Clone for ExecutionEngine {

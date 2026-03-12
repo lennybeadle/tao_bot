@@ -7,14 +7,6 @@ edition = "2021"
 name = "start_bot"
 path = "src/bin/start_bot.rs"
 
-[[bin]]
-name = "start_api"
-path = "src/bin/start_api.rs"
-
-[[bin]]
-name = "init_db"
-path = "src/bin/init_db.rs"
-
 [dependencies]
 # Async runtime
 tokio = { version = "1.35", features = ["full"] }
@@ -24,16 +16,9 @@ tokio-stream = "0.1"
 subxt = { version = "0.34", features = ["jsonrpsee", "substrate-compat", "sp-core", "sp-runtime"] }
 parity-scale-codec = { version = "3.0", features = ["derive"] }
 
-# Web framework
-axum = "0.7"
-tower = "0.4"
-tower-http = { version = "0.5", features = ["cors", "trace"] }
+# Tracing
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-
-# Database
-sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "sqlite", "chrono"] }
-chrono = { version = "0.4", features = ["serde"] }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -62,8 +47,11 @@ log = "0.4"
 # HTTP client
 reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
 
-# WebSocket
-tokio-tungstenite = { version = "0.21", features = ["rustls-tls"] }
+# WebSocket (not currently used, but kept for future WebSocket support)
+# tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
+
+# OpenSSL vendored for cross-compilation support
+openssl-sys = { version = "0.9", features = ["vendored"] }
 
 [dev-dependencies]
 tokio-test = "0.4"

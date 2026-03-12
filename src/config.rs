@@ -24,10 +24,9 @@ pub struct BotConfig {
     pub mempool_check_interval: f64,
     pub transaction_timeout: f64,
     pub use_multiple_rpc: bool,
-    pub database_url: String,
-    pub api_host: String,
-    pub api_port: u16,
+    #[serde(skip)]
     pub monitored_subnets: Arc<RwLock<Vec<i32>>>,
+    #[serde(skip)]
     pub allowed_wallet_addresses: Arc<RwLock<Vec<String>>>,
 }
 
@@ -42,7 +41,7 @@ impl BotConfig {
         dotenv::dotenv().ok();
         
         let monitored_subnets = Self::get_default_monitored_subnets();
-        let allowed_wallet_addresses = Self::get_allowed_wallet_addresses();
+        let allowed_wallet_addresses = Self::get_default_allowed_wallet_addresses();
         
         Self {
             subtensor_rpc: env::var("SUBTENSOR_RPC")
@@ -90,14 +89,6 @@ impl BotConfig {
                 .unwrap_or_else(|_| "true".to_string())
                 .parse()
                 .unwrap_or(true),
-            database_url: env::var("DATABASE_URL")
-                .unwrap_or_else(|_| "sqlite:./bot.db".to_string()),
-            api_host: env::var("API_HOST")
-                .unwrap_or_else(|_| "0.0.0.0".to_string()),
-            api_port: env::var("API_PORT")
-                .unwrap_or_else(|_| "8000".to_string())
-                .parse()
-                .unwrap_or(8000),
             monitored_subnets: Arc::new(RwLock::new(monitored_subnets)),
             allowed_wallet_addresses: Arc::new(RwLock::new(allowed_wallet_addresses)),
         }
@@ -111,7 +102,7 @@ impl BotConfig {
             .collect()
     }
 
-    fn get_allowed_wallet_addresses() -> Vec<String> {
+    fn get_default_allowed_wallet_addresses() -> Vec<String> {
         env::var("ALLOWED_WALLET_ADDRESSES")
             .unwrap_or_else(|_| "".to_string())
             .split(',')
@@ -121,18 +112,14 @@ impl BotConfig {
     }
 
     pub async fn reload_monitored_subnets(&self) -> anyhow::Result<()> {
-        let subnets = database::get_monitored_subnets().await?;
-        if !subnets.is_empty() {
-            *self.monitored_subnets.write().await = subnets;
-        } else {
-            *self.monitored_subnets.write().await = Self::get_default_monitored_subnets();
-        }
+        // Reload from environment variable
+        *self.monitored_subnets.write().await = Self::get_default_monitored_subnets();
         Ok(())
     }
 
     pub async fn reload_allowed_wallet_addresses(&self) -> anyhow::Result<()> {
-        let addresses = database::get_allowed_wallet_addresses().await?;
-        *self.allowed_wallet_addresses.write().await = addresses;
+        // Reload from environment variable
+        *self.allowed_wallet_addresses.write().await = Self::get_default_allowed_wallet_addresses();
         Ok(())
     }
 

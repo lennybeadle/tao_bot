@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::{sleep, Duration};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 use subxt::OnlineClient;
 use subxt::config::PolkadotConfig;
 use crate::config;
@@ -123,7 +123,7 @@ impl MempoolListener {
         }
     }
 
-    async fn process_mempool(&self) {
+    async fn process_mempool(&self) -> Result<()> {
         let substrates = self.substrates.read().await.clone();
         let mut pending_extrinsics = Vec::new();
 
@@ -143,6 +143,8 @@ impl MempoolListener {
                 listener.process_extrinsic(extrinsic_hex, now).await;
             });
         }
+        
+        Ok(())
     }
 
     pub async fn start(&self) -> Result<()> {

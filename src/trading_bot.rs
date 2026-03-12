@@ -3,15 +3,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::sleep;
-use tracing::{debug, error, info};
+use tracing::{error, info};
 use subxt::OnlineClient;
 use subxt::config::PolkadotConfig;
 use crate::config;
 use crate::mempool_listener::{MempoolListener, StakeData};
-use crate::price_simulator::{PriceSimulator, SubnetPool};
+use crate::price_simulator::SubnetPool;
 use crate::execution_engine::ExecutionEngine;
-use crate::models::Trade;
-use crate::database;
 
 pub struct TradingBot {
     mempool_listener: MempoolListener,
@@ -65,9 +63,6 @@ impl TradingBot {
                 bot_clone.handle_stake_detection(stake_data).await;
             });
         })).await;
-
-        // Initialize database
-        database::init_db().await?;
 
         info!("Trading bot initialized");
         Ok(())
@@ -138,60 +133,34 @@ impl TradingBot {
             bot_stake, wallet_stake, bot_balance
         );
 
-        // Create trade data
+        // Create trade ID
         let trade_id = format!("{}_{}_{}", netuid, wallet_address, 
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs());
 
-        let trade_data = Trade {
-            id: None,
-            timestamp: chrono::Utc::now(),
-            subnet_id: netuid,
-            wallet_address,
-            wallet_stake,
-            bot_stake,
-            price_after: None,
-            actual_profit: None,
-            bot_stake_tx: None,
-            bot_unstake_tx: None,
-            wallet_tx: None,
-            status: "pending".to_string(),
-            error_message: None,
-        };
-
         // Execute trade immediately (fire and continue)
         let bot = self.clone();
         tokio::spawn(async move {
-            bot.execute_trade(trade_id, trade_data).await;
+            bot.execute_trade(trade_id, netuid, wallet_address, wallet_stake, bot_stake).await;
         });
     }
 
-    async fn execute_trade(&self, trade_id: String, mut trade_data: Trade) {
-        let netuid = trade_data.subnet_id;
-        let bot_stake = trade_data.bot_stake;
-
+    async fn execute_trade(&self, trade_id: String, netuid: i32, wallet_address: String, wallet_stake: f64, bot_stake: f64) {
         // Step 1: Bot stakes
         info!("Executing bot stake: {:.4} TAO on subnet {}", bot_stake, netuid);
         
         match self.execution_engine.execute_stake(netuid, bot_stake, Some(trade_id.clone())).await {
             Ok(Some(stake_tx)) => {
-                trade_data.bot_stake_tx = Some(stake_tx);
-                trade_data.status = "staked".to_string();
+                info!("Bot stake transaction: {}", stake_tx);
             }
             Ok(None) => {
                 error!("Bot stake failed");
-                trade_data.status = "failed".to_string();
-                trade_data.error_message = Some("Bot stake transaction failed".to_string());
-                self.record_trade(trade_data).await;
                 return;
             }
             Err(e) => {
                 error!("Bot stake error: {}", e);
-                trade_data.status = "failed".to_string();
-                trade_data.error_message = Some(format!("Bot stake error: {}", e));
-                self.record_trade(trade_data).await;
                 return;
             }
         }
@@ -205,31 +174,21 @@ impl TradingBot {
         
         match self.execution_engine.execute_unstake(netuid, bot_stake, Some(trade_id.clone())).await {
             Ok(Some(unstake_tx)) => {
-                trade_data.bot_unstake_tx = Some(unstake_tx);
-                trade_data.status = "completed".to_string();
+                info!("Bot unstake transaction: {}", unstake_tx);
             }
             Ok(None) => {
                 error!("Bot unstake failed");
-                trade_data.status = "failed".to_string();
-                trade_data.error_message = Some("Bot unstake transaction failed".to_string());
+                return;
             }
             Err(e) => {
                 error!("Bot unstake error: {}", e);
-                trade_data.status = "failed".to_string();
-                trade_data.error_message = Some(format!("Bot unstake error: {}", e));
+                return;
             }
         }
 
-        // Record trade asynchronously
-        self.execution_engine.record_trade_async(trade_data.clone()).await;
         *self.daily_trades.write().await += 1;
-
-        info!("✅ Trade completed: {}", trade_id);
-    }
-
-    async fn record_trade(&self, trade_data: Trade) {
-        // Record trade in database
-        // This would use sqlx to insert
+        info!("✅ Trade completed: {} (subnet: {}, wallet: {}, bot_stake: {:.4} TAO)", 
+              trade_id, netuid, wallet_address, bot_stake);
     }
 
     pub async fn start(&self) -> Result<()> {
