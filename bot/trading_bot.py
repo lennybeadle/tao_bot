@@ -3,6 +3,7 @@ Main trading bot that orchestrates detection, simulation, and execution
 """
 import asyncio
 import logging
+import time
 from typing import Dict, Any, Optional
 from datetime import datetime
 import bittensor as bt
@@ -245,74 +246,30 @@ class TradingBot:
             logger.debug(f"Error updating DB cache: {e}")
     
     async def _handle_stake_detection(self, tx_data: Dict[str, Any]):
-        """Handle detected stake transaction - optimized for speed with latency tracking"""
-        import time
-        handle_start = time.time()
+        """Handle detected stake transaction - optimized for speed"""
         
         netuid = tx_data["netuid"]
         wallet_stake = tx_data["amount"]
         wallet_address = tx_data.get("hotkey_ss58", "unknown")
         
         # Get bot wallet balance
-        balance_start = time.time()
         bot_balance = await self.execution_engine.get_wallet_balance()
-        balance_time = (time.time() - balance_start) * 1000
-        logger.info(f"⏱️ _handle_stake_detection: get_wallet_balance: {balance_time:.2f}ms")
         
         if bot_balance is None:
-            handle_time = (time.time() - handle_start) * 1000
-            logger.info(f"⏱️ _handle_stake_detection: {handle_time:.2f}ms - Could not get bot wallet balance")
+            logger.info("Could not get bot wallet balance")
             return
         
         # Calculate stake amount:
-        calc_start = time.time()
         min_reserve = config.min_wallet_reserve
         if bot_balance >= wallet_stake + min_reserve:
             bot_stake = wallet_stake
         else:
             bot_stake = max(0, bot_balance - min_reserve)
-        calc_time = (time.time() - calc_start) * 1000
-        logger.info(f"⏱️ _handle_stake_detection: calculate_stake: {calc_time:.2f}ms")
-        
-        # Measure latency from mempool detection to decision point (right before the check)
-        latency_start = time.time()
-        detection_timestamp = tx_data.get("detection_timestamp")
-        callback_start_timestamp = tx_data.get("callback_start_timestamp")
-        detect_to_decision_latency = None
-        
-        # Use callback_start_timestamp if available (more accurate - accounts for queue delay)
-        # Otherwise fall back to detection_timestamp
-        if callback_start_timestamp:
-            current_time = time.time()
-            detect_to_decision_latency = (current_time - callback_start_timestamp) * 1000  # Convert to milliseconds
-            # Also track queue delay separately for debugging
-            if detection_timestamp:
-                queue_delay = (callback_start_timestamp - detection_timestamp) * 1000
-                logger.info(f"⏱️ Queue delay (detection to callback start): {queue_delay:.2f}ms")
-        elif detection_timestamp:
-            current_time = time.time()
-            detect_to_decision_latency = (current_time - detection_timestamp) * 1000  # Convert to milliseconds
-        
-        if detect_to_decision_latency is not None:
-            self.latency_metrics["detect_to_decision"].append(detect_to_decision_latency)
-            # Keep only last 100 measurements
-            if len(self.latency_metrics["detect_to_decision"]) > 100:
-                self.latency_metrics["detect_to_decision"] = self.latency_metrics["detect_to_decision"][-100:]
-        
-        latency_time = (time.time() - latency_start) * 1000
-        logger.info(f"⏱️ _handle_stake_detection: latency_tracking: {latency_time:.2f}ms")
-        if detect_to_decision_latency is not None:
-            logger.debug(f"⏱️ Detection to decision latency: {detect_to_decision_latency:.2f}ms")
         
         if bot_stake <= 0:
-            handle_time = (time.time() - handle_start) * 1000
-            latency_info = ""
-            if detect_to_decision_latency is not None:
-                latency_info = f" [latency: {detect_to_decision_latency:.2f}ms]"
             logger.info(
-                f"⏱️ _handle_stake_detection: {handle_time:.2f}ms (balance: {balance_time:.2f}ms, calc: {calc_time:.2f}ms, latency: {latency_time:.2f}ms) - "
                 f"⏭️ Skipping trade: insufficient balance "
-                f"(balance: {bot_balance:.4f} TAO, need: {wallet_stake:.4f} TAO, reserve: {min_reserve:.4f} TAO){latency_info}"
+                f"(balance: {bot_balance:.4f} TAO, need: {wallet_stake:.4f} TAO, reserve: {min_reserve:.4f} TAO)"
             )
             return
         
@@ -322,7 +279,6 @@ class TradingBot:
         )
         
         # Create trade data
-        trade_data_start = time.time()
         trade_id = f"{netuid}_{wallet_address}_{time.time()}"
         
         trade_data = {
@@ -333,19 +289,9 @@ class TradingBot:
             "status": "pending",
             "wallet_tx": tx_data.get("tx_hash")
         }
-        trade_data_time = (time.time() - trade_data_start) * 1000
-        logger.info(f"⏱️ _handle_stake_detection: create_trade_data: {trade_data_time:.2f}ms")
         
         # Execute trade immediately (don't await - fire and continue)
-        execute_start = time.time()
         asyncio.create_task(self._execute_trade(trade_id, trade_data))
-        execute_time = (time.time() - execute_start) * 1000
-        logger.info(f"⏱️ _handle_stake_detection: create_task: {execute_time:.2f}ms")
-        
-        handle_time = (time.time() - handle_start) * 1000
-        logger.info(f"⏱️ _handle_stake_detection: total: {handle_time:.2f}ms (balance: {balance_time:.2f}ms, calc: {calc_time:.2f}ms, latency: {latency_time:.2f}ms, trade_data: {trade_data_time:.2f}ms, execute: {execute_time:.2f}ms)")
-        
-        # Record total pipeline latency
     
     
     async def _execute_trade(
@@ -353,7 +299,7 @@ class TradingBot:
         trade_id: str,
         trade_data: Dict[str, Any],
     ):
-        """Execute front-run trade with latency tracking"""
+        """Execute front-run trade"""
         try:
             netuid = trade_data["subnet_id"]
             bot_stake = trade_data["bot_stake"]

@@ -369,8 +369,6 @@ class ExecutionEngine:
                 logger.warning(f"❌ Invalid stake amount: {amount:.4f} TAO")
                 return None
             
-            broadcast_start = time.time()
-            
             # Check pre-signed cache first (fastest path)
             # Note: Pre-signed transactions may have stale nonces, so we'll try them first
             # but fall back to fresh signing if they fail
@@ -387,9 +385,7 @@ class ExecutionEngine:
                     
                     # If pre-signed works, we're done (fastest path)
                     if tx_hash:
-                        broadcast_time = time.time() - broadcast_start
-                        self._record_latency("decision_to_broadcast", broadcast_time * 1000)
-                        logger.info(f"✅ Pre-signed stake broadcast in {broadcast_time*1000:.1f}ms: {tx_hash}")
+                        logger.info(f"✅ Pre-signed stake broadcast: {tx_hash}")
                         
                         if trade_id:
                             self.active_trades[trade_id] = {
@@ -449,11 +445,9 @@ class ExecutionEngine:
             
             # Broadcast to multiple nodes
             tx_hash = await self._broadcast_to_multiple_nodes(tx_bytes)
-            broadcast_time = time.time() - broadcast_start
-            self._record_latency("decision_to_broadcast", broadcast_time * 1000)
             
             if tx_hash:
-                logger.info(f"✅ Stake broadcast in {broadcast_time*1000:.1f}ms: {tx_hash}")
+                logger.info(f"✅ Stake broadcast: {tx_hash}")
                 
                 if trade_id:
                     self.active_trades[trade_id] = {
@@ -499,7 +493,6 @@ class ExecutionEngine:
             return None
         
         try:
-            broadcast_start = time.time()
             amount_rao = int(amount * 1e9)
             
             logger.info(f"⚡ FAST UNSTAKING {amount} TAO from subnet {netuid}")
@@ -545,10 +538,9 @@ class ExecutionEngine:
             
             # Broadcast to multiple nodes
             tx_hash = await self._broadcast_to_multiple_nodes(tx_bytes)
-            broadcast_time = time.time() - broadcast_start
             
             if tx_hash:
-                logger.info(f"✅ Unstake broadcast in {broadcast_time*1000:.1f}ms: {tx_hash}")
+                logger.info(f"✅ Unstake broadcast: {tx_hash}")
                 
                 if trade_id and trade_id in self.active_trades:
                     self.active_trades[trade_id]["unstake_tx"] = tx_hash
